@@ -1,6 +1,4 @@
 #!/bin/bash
-# /usr/local/casata/modules/add.sh - con permisos 644 para JSON
-
 shopt -s nullglob
 set -euo pipefail
 
@@ -21,11 +19,7 @@ NC='\033[0m'
 mkdir -p "$METAREPOS_DIR" "$SINGREPOS_DIR" "$DATA_DIR"
 
 TEMP_FILE=""
-cleanup() {
-    if [ -n "${TEMP_FILE:-}" ] && [ -f "$TEMP_FILE" ]; then
-        rm -f "$TEMP_FILE"
-    fi
-}
+cleanup() { [ -n "${TEMP_FILE:-}" ] && [ -f "$TEMP_FILE" ] && rm -f "$TEMP_FILE"; }
 trap cleanup EXIT
 
 if ! command -v jq &>/dev/null || ! command -v wget &>/dev/null; then
@@ -48,15 +42,15 @@ process_singrepo() {
             echo -ne "     ${GREEN}[+] Registrado singrepo: ${pkg_name}${NC} ... "
             if wget -q --timeout=30 --tries=2 -O "$DATA_DIR/${pkg_name}.json" "$data_url"; then
                 chmod 644 "$DATA_DIR/${pkg_name}.json"
-                echo -e "${GREEN}OK (datos descargados)${NC}"
+                echo -e "${GREEN}OK${NC}"
             else
-                echo -e "${RED}FALLO al descargar datos${NC}"
+                echo -e "${RED}FALLO datos${NC}"
             fi
         else
-            echo -e "     ${RED}[!] JSON inválido (falta name o data_url) en $url${NC}"
+            echo -e "     ${RED}[!] JSON inválido${NC}"
         fi
     else
-        echo -e "     ${RED}[!] Error de red al descargar singrepo: $url${NC}"
+        echo -e "     ${RED}[!] Error red${NC}"
     fi
 }
 
@@ -64,84 +58,69 @@ process_metarepo() {
     local url="$1"
     local temp_meta=$(mktemp)
     TEMP_FILE="$temp_meta"
-    echo -e "${YELLOW}Procesando metarepo desde: $url${NC}"
+    echo -e "${YELLOW}Procesando metarepo: $url${NC}"
     if ! wget -q --timeout=30 --tries=2 -O "$temp_meta" "$url"; then
-        echo -e "   ${RED}[!] Error de red al descargar metarepo.${NC}"
+        echo -e "   ${RED}[!] Error descarga${NC}"
         return 1
     fi
     if ! jq empty "$temp_meta" 2>/dev/null; then
-        echo -e "   ${RED}[!] El archivo descargado no es un JSON válido.${NC}"
+        echo -e "   ${RED}[!] JSON inválido${NC}"
         return 1
     fi
     local repo_name=$(jq -r '.name // empty' "$temp_meta")
     if [ -z "$repo_name" ]; then
-        echo -e "   ${RED}[!] El metarepo no tiene campo 'name'.${NC}"
+        echo -e "   ${RED}[!] Sin nombre${NC}"
         return 1
     fi
     local target_file="$METAREPOS_DIR/${repo_name}.json"
     mv "$temp_meta" "$target_file"
     chmod 644 "$target_file"
     TEMP_FILE=""
-    echo -e "   ${GREEN}[✓] Metarepo guardado: ${repo_name}${NC}"
-    echo -e "   ${YELLOW}Indexando paquetes incluidos...${NC}"
+    echo -e "   ${GREEN}[✓] Metarepo guardado: $repo_name${NC}"
+    echo -e "   ${YELLOW}Indexando...${NC}"
     jq -r 'to_entries[] | select(.key != "name" and .key != "metarepo") | .value' "$target_file" | while read -r singrepo_url; do
-        if [[ "$singrepo_url" == http* ]]; then
-            process_singrepo "$singrepo_url"
-        fi
+        [[ "$singrepo_url" == http* ]] && process_singrepo "$singrepo_url"
     done
 }
 
-if [ "$TYPE" == "singrepo" ]; then
-    [ -z "$URL" ] && { echo -e "${RED}Error: Falta la URL.${NC}"; exit 1; }
-    process_singrepo "$URL"
-    exit 0
-fi
-
-if [ "$TYPE" == "repo" ]; then
-    [ -z "$URL" ] && { echo -e "${RED}Error: Falta la URL.${NC}"; exit 1; }
-    process_metarepo "$URL"
-    exit 0
-fi
-
-if [ "$TYPE" == "oficial" ]; then
-    if [ ! -f "$OFICIAL_FILE" ]; then
-        echo -e "${RED}Error: No se encuentra $OFICIAL_FILE${NC}"
-        exit 1
-    fi
-    MASTER_URL=$(cat "$OFICIAL_FILE" | tr -d '[:space:]')
-    [ -z "$MASTER_URL" ] && { echo -e "${RED}Error: OFICIAL vacío.${NC}"; exit 1; }
-    echo -e "${GREEN}Sincronizando índice oficial desde: $MASTER_URL${NC}"
-    TEMP_LIST=$(mktemp)
-    TEMP_FILE="$TEMP_LIST"
-    if ! wget -q --timeout=30 --tries=2 -O "$TEMP_LIST" "$MASTER_URL"; then
-        echo -e "${RED}Error: No se pudo descargar el índice oficial.${NC}"
-        exit 1
-    fi
-    if ! jq -e 'type == "array"' "$TEMP_LIST" >/dev/null 2>&1; then
-        echo -e "${RED}Error: El índice oficial no es un array JSON.${NC}"
-        exit 1
-    fi
-    REPO_COUNT=0
-    ERRORS=0
-    while read -r repo_url; do
-        if [ -n "$repo_url" ]; then
-            REPO_COUNT=$((REPO_COUNT + 1))
-            echo -e "\n--- Procesando repositorio $REPO_COUNT ---"
-            if process_metarepo "$repo_url"; then
-                echo -e "   ${GREEN}Repositorio $REPO_COUNT procesado correctamente.${NC}"
-            else
-                ERRORS=$((ERRORS + 1))
-                echo -e "   ${YELLOW}Advertencia: Falló el repositorio $REPO_COUNT. Continuando...${NC}"
-            fi
+case "$TYPE" in
+    singrepo)
+        [ -z "$URL" ] && { echo -e "${RED}Falta URL${NC}"; exit 1; }
+        process_singrepo "$URL"
+        ;;
+    repo)
+        [ -z "$URL" ] && { echo -e "${RED}Falta URL${NC}"; exit 1; }
+        process_metarepo "$URL"
+        ;;
+    oficial)
+        if [ ! -f "$OFICIAL_FILE" ]; then
+            echo -e "${RED}Falta $OFICIAL_FILE${NC}"
+            exit 1
         fi
-    done < <(jq -r '.[]' "$TEMP_LIST")
-    echo -e "\n${GREEN}════════════════════════════════════════${NC}"
-    echo -e "${GREEN}Sincronización oficial completada.${NC}"
-    echo -e "Repositorios procesados: $REPO_COUNT"
-    echo -e "Errores: $ERRORS"
-    echo -e "${GREEN}════════════════════════════════════════${NC}"
-    exit 0
-fi
-
-echo -e "${RED}Uso: casata add <singrepo|repo|oficial> [URL]${NC}"
-exit 1
+        MASTER_URL=$(tr -d '[:space:]' < "$OFICIAL_FILE")
+        [ -z "$MASTER_URL" ] && { echo -e "${RED}OFICIAL vacío${NC}"; exit 1; }
+        echo -e "${GREEN}Índice oficial: $MASTER_URL${NC}"
+        TEMP_LIST=$(mktemp)
+        TEMP_FILE="$TEMP_LIST"
+        if ! wget -q --timeout=30 --tries=2 -O "$TEMP_LIST" "$MASTER_URL"; then
+            echo -e "${RED}Error descarga índice${NC}"
+            exit 1
+        fi
+        if ! jq -e 'type == "array"' "$TEMP_LIST" >/dev/null 2>&1; then
+            echo -e "${RED}Índice no es array JSON${NC}"
+            exit 1
+        fi
+        REPO_COUNT=0; ERRORS=0
+        while read -r repo_url; do
+            [ -n "$repo_url" ] || continue
+            REPO_COUNT=$((REPO_COUNT + 1))
+            echo -e "\n--- Repositorio $REPO_COUNT ---"
+            process_metarepo "$repo_url" && echo -e "   ${GREEN}OK${NC}" || { ERRORS=$((ERRORS+1)); echo -e "   ${YELLOW}Fallo${NC}"; }
+        done < <(jq -r '.[]' "$TEMP_LIST")
+        echo -e "\n${GREEN}Completado. Procesados: $REPO_COUNT, Errores: $ERRORS${NC}"
+        ;;
+    *)
+        echo -e "${RED}Uso: casata add <singrepo|repo|oficial> [URL]${NC}"
+        exit 1
+        ;;
+esac
