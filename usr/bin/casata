@@ -95,13 +95,7 @@ case "$COMMAND" in
 
     add)
         require_root
-        if [[ "$1" == "repo" || "$1" == "singrepo" ]]; then
-            [ -z "$2" ] && { echo "Error: Falta el enlace."; exit 1; }
-            run_module "add.sh" "$1" "$2"
-        else
-            echo "Uso: casata add <repo|singrepo> <enlace>"
-            exit 1
-        fi
+        run_module "add.sh" "$@"
         ;;
 
     show)
