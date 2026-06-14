@@ -1,12 +1,58 @@
-Casata Package Manager
-Uso: casata <comando> [opciones] [argumentos]
+═══════════════════════════════════════════════
+                 CASATA HELP
+═══════════════════════════════════════════════
 
-Comandos disponibles:
-  install [--user] <paquete>   Instala un paquete (global requiere sudo)
-  remove [--user] <paquete>    Elimina un paquete (global requiere sudo)
-  update                       Actualiza listas de repositorios (requiere sudo)
-  upgrade <paquete>            Actualiza un paquete (requiere sudo)
-  add repo <enlace>            Añade un meta repositorio (requiere sudo)
-  add singrepo <enlace>        Añade un singrepo (requiere sudo)
-  --version, -v                Muestra la versión de Casata
-  --help, --h, -h              Muestra este mensaje de ayuda
+Uso: casata <comando> [opciones] [args]
+
+Comandos principales:
+  install   Instalar un paquete
+  remove    Desinstalar un paquete
+  update    Actualizar repositorios
+  search    Buscar paquetes
+  info      Mostrar información de un paquete
+  list      Listar aplicaciones disponibles
+  show      Mostrar aplicaciones instaladas
+  clean     Limpiar huérfanos
+  add       Agregar repositorio/singrepo/oficial
+  help      Esta ayuda
+
+Opciones comunes:
+  -y        Responder sí automáticamente
+  --user    Instalar/desinstalar solo para el usuario
+  -d        Solo descargar (en install)
+  -d        Mostrar descripción (en list)
+  -v        Mostrar versión (en list)
+  -vd       Mostrar versión + descripción (en list)
+
+Ejemplos:
+  casata list                     # lista nombres
+  casata list -v                  # nombres + versiones
+  casata list -vd                 # nombres + versiones + descripción
+  casata search music
+  casata info mc-lan
+  casata install --user monojo-music
+  sudo casata install mc-lan -y
+  sudo casata remove mc-lan
+  sudo casata update
+  sudo casata add oficial         # sincroniza repositorio oficial
+  sudo casata add repo URL        # agrega un metarepo
+  sudo casata add singrepo URL    # agrega un paquete individual
+
+Alias reconocidos:
+  install = instalar
+  remove  = eliminar, remover
+  update  = actualizar
+  add     = agregar, añadir
+  show    = mostrar, ver
+  search  = buscar
+  info    = informacion
+  clean   = limpiar
+  list    = lista, ls
+  help    = ayuda, --help, -h
+
+Notas:
+  • Los comandos que modifican el sistema requieren sudo (excepto --user).
+  • Primera vez: sudo casata add oficial
+  • Requiere wget y jq instalados.
+
+═══════════════════════════════════════════════
