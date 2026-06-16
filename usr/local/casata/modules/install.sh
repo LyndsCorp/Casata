@@ -1,5 +1,5 @@
 #!/bin/bash
-# /usr/local/casata/modules/install.sh - soporte para múltiples paquetes y actualización de Casata con versión
+# /usr/local/casata/modules/install.sh
 
 shopt -s nullglob
 set -euo pipefail
@@ -178,7 +178,13 @@ install_one() {
         echo "$REPO_DEPS" | sed 's/^/  • /'
         if [ $AUTO_YES -eq 0 ]; then
             read -p "¿Instalar dependencias del sistema? [S/n] " resp < /dev/tty
-            [[ "$resp" =~ ^[Nn] ]] && { echo "Instalación abortada."; return 1; }
+            if [[ "$resp" =~ ^[Nn] ]]; then
+                echo -e "${YELLOW}Se omitió la instalación de dependencias del sistema.${NC}"
+            else
+                install_system_deps "$(echo "$REPO_DEPS" | tr '\n' ' ')" || return 1
+            fi
+        else
+            install_system_deps "$(echo "$REPO_DEPS" | tr '\n' ' ')" || return 1
         fi
         if [ $USER_INSTALL -eq 1 ]; then
             MISSING=""
@@ -192,8 +198,6 @@ install_one() {
                 read -p "¿Continuar sin ellas? [s/N] " resp < /dev/tty
                 [[ ! "$resp" =~ ^[Ss] ]] && return 1
             fi
-        else
-            install_system_deps "$(echo "$REPO_DEPS" | tr '\n' ' ')" || return 1
         fi
     fi
 
