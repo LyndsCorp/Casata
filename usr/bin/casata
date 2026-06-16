@@ -46,7 +46,7 @@ shift
 
 case "$COMMAND" in
     instalar|install) COMMAND="install" ;;
-    eliminar|remover|remove) COMMAND="remove" ;;
+    eliminar|uninstall|desinstalar|rm|remove) COMMAND="remove" ;;
     actualizar|update) COMMAND="update" ;;
     mejorar|upgrade) COMMAND="upgrade" ;;
     agregar|añadir|add) COMMAND="add" ;;
