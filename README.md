@@ -7,7 +7,7 @@ Desarrollado por David Baña Szymaniak
 
 ## 📌 Descripción
 
-Casata es un sistema de instalación y gestión de aplicaciones diseñado para LyndsOS. Su objetivo es ofrecer una forma simple, estructurada y controlada de instalar software sin depender directamente del formato `.deb` ni de interacción manual con el sistema base.
+Casata es un sistema de instalación y gestión de aplicaciones diseñado para LyndsOS. Su objetivo es ofrecer una forma simple, estructurada y controlada de instalar software sin depender directamente del formato `.deb` ni de interacción manual con el sistema base. Desarrollado por David Baña Szymaniak, Lynds Corp.
 
 Casata organiza las aplicaciones como unidades autocontenidas y gestiona su integración en el sistema mediante enlaces simbólicos y un modelo de repositorios.
 
