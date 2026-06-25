@@ -28,7 +28,6 @@ list_all() {
 # Sin argumentos -> listar todo
 # --------------------------------------------------
 if [ $# -eq 0 ]; then
-    echo -e "${YELLOW}Listando todos los paquetes disponibles:${NC}\n"
     list_all
     exit 0
 fi
@@ -36,26 +35,15 @@ fi
 # --------------------------------------------------
 # Detección de expansión accidental del glob
 # --------------------------------------------------
-# Si hay más de un argumento, seguro que el shell expandió un glob.
-# Si hay exactamente un argumento, comprobamos si existe como fichero/directorio
-# en el directorio actual (posible expansión de * a un único archivo).
-expansion_globo=false
-if [ $# -gt 1 ]; then
-    expansion_globo=true
-elif [ $# -eq 1 ] && [ -e "$1" ]; then
-    expansion_globo=true
-fi
-
-if $expansion_globo; then
-    echo -e "${YELLOW}⚠️  El shell expandió un metacarácter (*, ?, [) a los archivos del directorio actual.${NC}"
-    echo "   Para buscar con patrones glob sin expansión, entrecomilla: 'casata search \"patron\"'."
-    echo "   Mostrando todos los paquetes disponibles.\n"
+# Si hay más de un argumento, o el único argumento existe como fichero/directorio
+# en el directorio actual, asumimos que fue un metacarácter expandido.
+if [ $# -gt 1 ] || [ $# -eq 1 -a -e "$1" ]; then
     list_all
     exit 0
 fi
 
 # --------------------------------------------------
-# Procesamiento normal del argumento
+# Procesamiento normal del argumento (no expandido)
 # --------------------------------------------------
 TEXTO="$1"
 texto_lower="${TEXTO,,}"
@@ -77,7 +65,6 @@ if [[ "$texto_lower" == *[*?[]* ]]; then
         name_lower="${pkg_name,,}"
         desc_lower="${pkg_desc,,}"
 
-        # Comparación glob (sin comillas a la derecha)
         if [[ "$name_lower" == $texto_lower ]] || [[ "$desc_lower" == $texto_lower ]]; then
             echo -e "${GREEN}$pkg_name${NC} - $pkg_desc"
             FOUND=$((FOUND + 1))
