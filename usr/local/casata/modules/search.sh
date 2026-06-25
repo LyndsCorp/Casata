@@ -12,17 +12,36 @@ if [ -z "$(ls -A "$DATA_DIR" 2>/dev/null)" ]; then
     exit 0
 fi
 
-for DB_FILE in "$DATA_DIR"/*.json; do
-    # Leer campos usando jq
-    PKG_NAME=$(jq -r '.name' "$DB_FILE")
-    PKG_DESC=$(jq -r '.description // "Sin descripción"' "$DB_FILE")
-    
-    # Comprobar si el texto coincide con el nombre o la descripción (case-insensitive)
-    if [[ "${PKG_NAME,,}" == *"${TEXTO,,}"* ]] || [[ "${PKG_DESC,,}" == *"${TEXTO,,}"* ]]; then
-        echo -e "${GREEN}$PKG_NAME${NC} - $PKG_DESC"
-        FOUND=$((FOUND + 1))
-    fi
-done
+# Convertimos el texto a minúsculas una sola vez
+texto_lower="${TEXTO,,}"
+
+# Detectamos si contiene metacaracteres glob (*, ?, [)
+if [[ "$texto_lower" == *[*?[]* ]]; then
+    # MODO PATRÓN GLOB: emparejamos el nombre/descripción completos (case-insensitive)
+    for DB_FILE in "$DATA_DIR"/*.json; do
+        pkg_name=$(jq -r '.name' "$DB_FILE")
+        pkg_desc=$(jq -r '.description // "Sin descripción"' "$DB_FILE")
+        name_lower="${pkg_name,,}"
+        desc_lower="${pkg_desc,,}"
+
+        # Emparejamos con el patrón glob (sin comillas en la derecha para que sea patrón)
+        if [[ "$name_lower" == $texto_lower ]] || [[ "$desc_lower" == $texto_lower ]]; then
+            echo -e "${GREEN}$pkg_name${NC} - $pkg_desc"
+            FOUND=$((FOUND + 1))
+        fi
+    done
+else
+    # MODO SUBCADENA: comportamiento original
+    for DB_FILE in "$DATA_DIR"/*.json; do
+        pkg_name=$(jq -r '.name' "$DB_FILE")
+        pkg_desc=$(jq -r '.description // "Sin descripción"' "$DB_FILE")
+
+        if [[ "${pkg_name,,}" == *"$texto_lower"* ]] || [[ "${pkg_desc,,}" == *"$texto_lower"* ]]; then
+            echo -e "${GREEN}$pkg_name${NC} - $pkg_desc"
+            FOUND=$((FOUND + 1))
+        fi
+    done
+fi
 
 if [ $FOUND -eq 0 ]; then
     echo -e "${RED}No se encontraron paquetes que coincidan con '${TEXTO}'.${NC}"
