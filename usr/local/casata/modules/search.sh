@@ -3,13 +3,15 @@
 
 DATA_DIR="/usr/local/casata/data"
 
-# Colores (ajusta según tus definiciones)
+# Colores (ajústalos según tus definiciones)
 YELLOW="\e[33m"
 GREEN="\e[32m"
 RED="\e[31m"
 NC="\e[0m"
 
+# --------------------------------------------------
 # Función para listar todos los paquetes
+# --------------------------------------------------
 list_all() {
     if [ -z "$(ls -A "$DATA_DIR" 2>/dev/null)" ]; then
         echo "La base de datos local está vacía. Ejecuta 'casata update' primero."
@@ -22,40 +24,40 @@ list_all() {
     done
 }
 
-# Si no hay argumentos -> listar todo
+# --------------------------------------------------
+# Sin argumentos -> listar todo
+# --------------------------------------------------
 if [ $# -eq 0 ]; then
     echo -e "${YELLOW}Listando todos los paquetes disponibles:${NC}\n"
     list_all
     exit 0
 fi
 
-# Heurística: si hay más de un argumento, ver si parecen archivos del directorio actual (expansión de *)
+# --------------------------------------------------
+# Detección de expansión accidental del glob
+# --------------------------------------------------
+# Si hay más de un argumento, seguro que el shell expandió un glob.
+# Si hay exactamente un argumento, comprobamos si existe como fichero/directorio
+# en el directorio actual (posible expansión de * a un único archivo).
 expansion_globo=false
 if [ $# -gt 1 ]; then
-    # Comprobamos cuántos argumentos existen realmente como archivos/directorios en $PWD
-    matches=0
-    for arg in "$@"; do
-        if [ -e "$arg" ]; then
-            matches=$((matches + 1))
-        fi
-    done
-    # Si la mayoría son archivos existentes, muy probablemente fue una expansión de *
-    if [ $matches -gt 0 ]; then
-        expansion_globo=true
-    fi
+    expansion_globo=true
+elif [ $# -eq 1 ] && [ -e "$1" ]; then
+    expansion_globo=true
 fi
 
 if $expansion_globo; then
-    echo -e "${YELLOW}⚠️  Parece que usaste un metacarácter (*, ?, [) sin entrecomillar.${NC}"
-    echo "   El shell expandió el patrón a los archivos del directorio actual."
-    echo "   Para buscar con patrones glob, utiliza comillas: 'casata search \"patron\"'."
-    echo "   Mostrando todos los paquetes disponibles en su lugar.\n"
+    echo -e "${YELLOW}⚠️  El shell expandió un metacarácter (*, ?, [) a los archivos del directorio actual.${NC}"
+    echo "   Para buscar con patrones glob sin expansión, entrecomilla: 'casata search \"patron\"'."
+    echo "   Mostrando todos los paquetes disponibles.\n"
     list_all
     exit 0
 fi
 
-# Si llegamos aquí, procesamos los argumentos normalmente
-TEXTO="$1"  # solo consideramos el primer argumento para la búsqueda principal
+# --------------------------------------------------
+# Procesamiento normal del argumento
+# --------------------------------------------------
+TEXTO="$1"
 texto_lower="${TEXTO,,}"
 
 echo -e "${YELLOW}Resultados de búsqueda para:${NC} $TEXTO\n"
@@ -75,13 +77,14 @@ if [[ "$texto_lower" == *[*?[]* ]]; then
         name_lower="${pkg_name,,}"
         desc_lower="${pkg_desc,,}"
 
+        # Comparación glob (sin comillas a la derecha)
         if [[ "$name_lower" == $texto_lower ]] || [[ "$desc_lower" == $texto_lower ]]; then
             echo -e "${GREEN}$pkg_name${NC} - $pkg_desc"
             FOUND=$((FOUND + 1))
         fi
     done
 else
-    # MODO SUBCADENA (comportamiento original)
+    # MODO SUBCADENA (búsqueda original)
     for DB_FILE in "$DATA_DIR"/*.json; do
         pkg_name=$(jq -r '.name' "$DB_FILE")
         pkg_desc=$(jq -r '.description // "Sin descripción"' "$DB_FILE")
