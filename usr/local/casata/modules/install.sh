@@ -172,12 +172,7 @@ install_one() {
         fi
     fi
 
-    if [ $NEED_UPDATE -eq 1 ] || [ $NEED_UPDATE -eq 2 ]; then
-        echo -e "${YELLOW}Preparando actualización/reinstalación...${NC}"
-        force_remove "$APP_DIR" "$GUIDE_TARGET"
-    fi
-
-    # Gestión de dependencias
+    # Gestión de dependencias (Movido arriba del bloque de eliminación)
     if [ -n "$REPO_DEPS" ]; then
         echo -e "\n${YELLOW}Dependencias para $PKG_NAME:${NC}"
         echo "$REPO_DEPS" | sed 's/^/  • /'
@@ -210,6 +205,12 @@ install_one() {
         fi
     fi
 
+    # Eliminación segura (Solo ocurre si las dependencias no cancelaron la ejecución)
+    if [ $NEED_UPDATE -eq 1 ] || [ $NEED_UPDATE -eq 2 ]; then
+        echo -e "${YELLOW}Preparando actualización/reinstalación...${NC}"
+        force_remove "$APP_DIR" "$GUIDE_TARGET"
+    fi
+
     # Descarga y extracción
     mkdir -p "$APP_DIR"
     ARCHIVE_NAME=$(basename "$DOWNLOAD_URL" | cut -d '?' -f1)
@@ -228,7 +229,7 @@ install_one() {
 
     SRC_DIR=$(find "$EXTRACT_DIR" -name "VERSION" -exec dirname {} \; | head -1)
     [ -z "$SRC_DIR" ] && SRC_DIR=$(find "$EXTRACT_DIR" -mindepth 1 -maxdepth 1 -type d | head -1)
-    [ -z "$SRC_DIR" ] && SRC_DIR="$EXTRACT_DIR"
+    [ -z "$SRC_DIR" ] && "$SRC_DIR"="$EXTRACT_DIR"
 
     mv "$SRC_DIR"/* "$APP_DIR/" 2>/dev/null || mv "$SRC_DIR"/.??* "$APP_DIR/" 2>/dev/null || true
     rm -rf "$EXTRACT_DIR" "$ARCHIVE_PATH"
