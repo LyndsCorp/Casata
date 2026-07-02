@@ -34,14 +34,14 @@ Casata utiliza la siguiente estructura base:
 ├── repos/             # Repositorios y metarepos
 │   ├── metarepos/
 │   └── singrepos/
-├── db/                # Base de datos local de paquetes
+├── data/                # Base de datos local de paquetes
 └── modules/           # Núcleo del sistema Casata
 
 Modo usuario:
 
 ~/.local/casata/
 ├── apps/              # Aplicaciones instaladas por usuario
-└── db/                # Base de datos del usuario
+└── data/                # Base de datos del usuario
 ```
 
 ---
