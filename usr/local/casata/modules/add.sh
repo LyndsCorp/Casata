@@ -1,4 +1,6 @@
 #!/bin/bash
+#/usr/local/casata/modules/add.sh
+
 shopt -s nullglob
 set -euo pipefail
 
@@ -10,6 +12,9 @@ METAREPOS_DIR="$CASATA_ROOT/repos/metarepos"
 SINGREPOS_DIR="$CASATA_ROOT/repos/singrepos"
 DATA_DIR="$CASATA_ROOT/data"
 OFICIAL_FILE="$CASATA_ROOT/repos/OFICIAL"
+COMMUNITY_FILE="$CASATA_ROOT/repos/COMMUNITY"
+FORGE_FILE="$CASATA_ROOT/repos/FORGE"
+OTHERS_FILE="$CASATA_ROOT/repos/OTHERS"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -83,6 +88,44 @@ process_metarepo() {
     done
 }
 
+# Función unificada para procesar listas maestras (comunity, forge, others)
+process_master_list() {
+    local file="$1"
+    local label="$2"
+    if [ ! -f "$file" ]; then
+        echo -e "${RED}Falta $file${NC}"
+        return 1
+    fi
+    MASTER_URL=$(tr -d '[:space:]' < "$file")
+    [ -z "$MASTER_URL" ] && { echo -e "${RED}${label} vacío${NC}"; return 1; }
+    echo -e "${GREEN}Índice ${label}: $MASTER_URL${NC}"
+    TEMP_LIST=$(mktemp)
+    TEMP_FILE="$TEMP_LIST"
+    if ! wget -q --timeout=30 --tries=2 -O "$TEMP_LIST" "$MASTER_URL"; then
+        echo -e "${RED}Error descarga índice${NC}"
+        return 1
+    fi
+    if ! jq -e 'type == "array"' "$TEMP_LIST" >/dev/null 2>&1; then
+        echo -e "${RED}Índice no es array JSON${NC}"
+        return 1
+    fi
+    REPO_COUNT=0; ERRORS=0
+    while read -r repo_url; do
+        [ -n "$repo_url" ] || continue
+        REPO_COUNT=$((REPO_COUNT + 1))
+        echo -e "\n--- Repositorio $REPO_COUNT ---"
+        process_metarepo "$repo_url" && echo -e "   ${GREEN}OK${NC}" || { ERRORS=$((ERRORS+1)); echo -e "   ${YELLOW}Fallo${NC}"; }
+    done < <(jq -r '.[]' "$TEMP_LIST")
+    echo -e "\n${GREEN}Completado. Procesados: $REPO_COUNT, Errores: $ERRORS${NC}"
+}
+
+# Normalización de alias
+case "$TYPE" in
+    comunity|community|comunidad|comunitario) TYPE="community" ;;
+    forge|forja|forjado)                   TYPE="forge" ;;
+    others|other|otro|otros)       TYPE="others" ;;
+esac
+
 case "$TYPE" in
     singrepo)
         [ -z "$URL" ] && { echo -e "${RED}Falta URL${NC}"; exit 1; }
@@ -97,30 +140,19 @@ case "$TYPE" in
             echo -e "${RED}Falta $OFICIAL_FILE${NC}"
             exit 1
         fi
-        MASTER_URL=$(tr -d '[:space:]' < "$OFICIAL_FILE")
-        [ -z "$MASTER_URL" ] && { echo -e "${RED}OFICIAL vacío${NC}"; exit 1; }
-        echo -e "${GREEN}Índice oficial: $MASTER_URL${NC}"
-        TEMP_LIST=$(mktemp)
-        TEMP_FILE="$TEMP_LIST"
-        if ! wget -q --timeout=30 --tries=2 -O "$TEMP_LIST" "$MASTER_URL"; then
-            echo -e "${RED}Error descarga índice${NC}"
-            exit 1
-        fi
-        if ! jq -e 'type == "array"' "$TEMP_LIST" >/dev/null 2>&1; then
-            echo -e "${RED}Índice no es array JSON${NC}"
-            exit 1
-        fi
-        REPO_COUNT=0; ERRORS=0
-        while read -r repo_url; do
-            [ -n "$repo_url" ] || continue
-            REPO_COUNT=$((REPO_COUNT + 1))
-            echo -e "\n--- Repositorio $REPO_COUNT ---"
-            process_metarepo "$repo_url" && echo -e "   ${GREEN}OK${NC}" || { ERRORS=$((ERRORS+1)); echo -e "   ${YELLOW}Fallo${NC}"; }
-        done < <(jq -r '.[]' "$TEMP_LIST")
-        echo -e "\n${GREEN}Completado. Procesados: $REPO_COUNT, Errores: $ERRORS${NC}"
+        process_master_list "$OFICIAL_FILE" "oficial"
+        ;;
+    community)
+        process_master_list "$COMMUNITY_FILE" "community"
+        ;;
+    forge)
+        process_master_list "$FORGE_FILE" "forge"
+        ;;
+    others)
+        process_master_list "$OTHERS_FILE" "others"
         ;;
     *)
-        echo -e "${RED}Uso: casata add <singrepo|repo|oficial> [URL]${NC}"
+        echo -e "${RED}Uso: casata add <singrepo|repo|oficial|community|forge|others> [URL]${NC}"
         exit 1
         ;;
 esac
