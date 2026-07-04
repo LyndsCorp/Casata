@@ -377,6 +377,17 @@ if [ ${#PACKAGES[@]} -eq 1 ] && [ "${PACKAGES[0]}" == "casata" ]; then
     chmod +x "$GLOBAL_ROOT"/modules/*.sh
     cp -f "$EXTRACTED/usr/local/casata/"{HELP,VERSION,WELCOME} "$GLOBAL_ROOT/" 2>/dev/null
 
+    # ===== NUEVO: Copiar los repositorios oficiales =====
+    if [ -d "$EXTRACTED/usr/local/casata/repos" ]; then
+        echo -e "${YELLOW}Actualizando repositorios...${NC}"
+        rm -rf "$GLOBAL_ROOT/repos"
+        cp -r "$EXTRACTED/usr/local/casata/repos" "$GLOBAL_ROOT/"
+        echo -e "${GREEN}Repositorios actualizados correctamente.${NC}"
+    else
+        echo -e "${YELLOW}Aviso: No se encontró la carpeta 'repos' en la actualización; se mantiene la versión actual.${NC}"
+    fi
+    # ===================================================
+
     echo -e "${GREEN}Casata actualizado correctamente a la versión $REMOTE_VERSION.${NC}"
     exit 0
 fi
