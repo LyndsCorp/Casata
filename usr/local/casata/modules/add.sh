@@ -102,11 +102,11 @@ process_master_list() {
     TEMP_LIST=$(mktemp)
     TEMP_FILE="$TEMP_LIST"
     if ! wget -q --timeout=30 --tries=2 -O "$TEMP_LIST" "$MASTER_URL"; then
-        echo -e "${RED}Error descarga índice${NC}"
+        echo -e "${RED}PROBLEMA DE RED DEL CLIENTE: Error descarga índice${NC}"
         return 1
     fi
     if ! jq -e 'type == "array"' "$TEMP_LIST" >/dev/null 2>&1; then
-        echo -e "${RED}Índice no es array JSON${NC}"
+        echo -e "${RED}PROBLEMA DE SERVIDOR: Índice no es array JSON${NC}"
         return 1
     fi
     REPO_COUNT=0; ERRORS=0
