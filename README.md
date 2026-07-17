@@ -246,11 +246,14 @@ Verificación de repositorios firmados
 
 Tienda central de aplicaciones Monojo
 
+---
 
+👥 Colaboradores
 
 ---
 
 👤 Autor
 
 David Baña Szymaniak,
-Aros Legendarios
+Aros Legendarios,
+Lynds Corp.
