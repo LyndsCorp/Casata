@@ -326,7 +326,7 @@ if [ ${#PACKAGES[@]} -eq 1 ] && [ "${PACKAGES[0]}" == "casata" ]; then
 
     # Obtener versión remota desde GitHub
     REMOTE_VERSION="desconocida"
-    REMOTE_URL="https://raw.githubusercontent.com/Monojo-Project/Casata/main/usr/local/casata/VERSION"
+    REMOTE_URL="https://raw.githubusercontent.com/LyndsCorp/Casata/main/usr/local/casata/VERSION"
     echo -e "${YELLOW}Consultando versión remota...${NC}"
     if wget -q --timeout=10 -O /tmp/casata_remote_version "$REMOTE_URL" 2>/dev/null; then
         REMOTE_VERSION=$(cat /tmp/casata_remote_version 2>/dev/null | tr -d '[:space:]')
@@ -357,7 +357,7 @@ if [ ${#PACKAGES[@]} -eq 1 ] && [ "${PACKAGES[0]}" == "casata" ]; then
     fi
 
     TEMP_DIR=$(mktemp -d)
-    ZIP_URL="https://github.com/Monojo-Project/Casata/archive/refs/heads/main.zip"
+    ZIP_URL="https://github.com/LyndsCorp/Casata/archive/refs/heads/main.zip"
     echo -e "${YELLOW}Descargando desde GitHub...${NC}"
     if ! wget -q --show-progress -O "$TEMP_DIR/casata.zip" "$ZIP_URL"; then
         echo -e "${RED}Error al descargar la actualización.${NC}"
