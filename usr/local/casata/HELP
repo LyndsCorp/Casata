@@ -29,9 +29,9 @@ COMANDOS:
           [--user nombre]  → Lee el historial completo de un usuario en concreto
           []               → Al no poner nada, te lee el historial completo de tu usuario (si lo ejecutas con sudo, es del sistema)
   
-  clean                   → Limpia huérfanos (singrepos/datos no referenciados)
+  clean                    → Limpia huérfanos (singrepos/datos no referenciados)
 
-  show                    → Resumen de apps instaladas
+  show                     → Resumen de apps instaladas
 
 OPCIONES COMUNES:
   -y          → responde "sí" a todo

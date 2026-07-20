@@ -63,7 +63,7 @@ fi
 if [ "$NoInstalar" == "0" ]; then
     #copiar el script para que sea un comando
     echo "Copiando el router (casata.sh) al /usr/bin/casata para que sea un comando en la terminal..."
-    cp usr/bin/casata.sh /usr/bin/casata
+    cp usr/bin/casata /usr/bin/casata
 
     echo "Dándole permisos de ejecución a /usr/bin/casata para que reconozca el comando..."
     chmod +x /usr/bin/casata
