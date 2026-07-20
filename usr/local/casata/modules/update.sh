@@ -1,5 +1,8 @@
 #!/bin/bash
+
 # /usr/local/casata/modules/update.sh
+# Copyright (C) 2026, GPL v3+, Lynds Corp., Aros Legendarios, David Baña Szymaniak
+# Script de actualización de repositorios de Casata
 
 shopt -s nullglob
 set -euo pipefail
@@ -37,12 +40,14 @@ if [ -z "$(ls -A "$METAREPOS_DIR" 2>/dev/null)" ]; then
     exit 0
 fi
 
+# Contar metarepos antes de procesar
+TOTAL_METAREPOS=$(ls -1 "$METAREPOS_DIR"/*.json 2>/dev/null | wc -l)
+echo -e "${BLUE}Se procesarán $TOTAL_METAREPOS metarepos.${NC}"
+
 ERRORES=0
-TOTAL_METAREPOS=0
 
 for REPO_FILE in "$METAREPOS_DIR"/*.json; do
     [ -f "$REPO_FILE" ] || continue
-    TOTAL_METAREPOS=$((TOTAL_METAREPOS + 1))
 
     METAREPO_URL=$(jq -r '.metarepo // empty' "$REPO_FILE")
     if [ -n "$METAREPO_URL" ]; then
@@ -59,7 +64,7 @@ for REPO_FILE in "$METAREPOS_DIR"/*.json; do
                 ((ERRORES++))
             fi
         else
-            echo -e "${RED}✗ Falló descarga. Conservando metarepo local.${NC}"
+            echo -e "${RED}✗ Error del servidor al descargar el metarepo. Conservando metarepo local.${NC}"
             rm -f "$TEMP_META"
             ((ERRORES++))
         fi
@@ -81,13 +86,13 @@ for REPO_FILE in "$METAREPOS_DIR"/*.json; do
                 chmod 644 "$SINGREPOS_DIR/${PKG_NAME}.json"
                 echo -e "     ${GREEN}✓ Singrepo actualizado${NC}"
             else
-                echo -e "     ${RED}✗ JSON inválido${NC}"
+                echo -e "     ${RED}✗ JSON inválido (el archivo descargado no es JSON válido).${NC}"
                 rm -f "$TEMP_SING"
                 ((ERRORES++))
                 continue
             fi
         else
-            echo -e "     ${RED}✗ Falló descarga del singrepo${NC}"
+            echo -e "     ${RED}✗ Error del servidor al descargar el singrepo.${NC}"
             rm -f "$TEMP_SING"
             ((ERRORES++))
             continue
@@ -109,7 +114,7 @@ for REPO_FILE in "$METAREPOS_DIR"/*.json; do
                 ((ERRORES++))
             fi
         else
-            echo -e "${RED}FALLO (red)${NC}"
+            echo -e "${RED}FALLO (error del servidor)${NC}"
             rm -f "$TEMP_DATA"
             ((ERRORES++))
         fi
