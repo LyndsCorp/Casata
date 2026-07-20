@@ -44,17 +44,17 @@ install_system_deps() {
 
     # Ejecutar apt update solo la primera vez
     if [ $APT_UPDATE_STATUS -eq 0 ]; then
-        echo -e "${YELLOW}Ejecutando 'apt update' (solo una vez)...${NC}"
+        echo -e "${YELLOW}Ejecutando apt update...${NC}"
         if apt update; then
             APT_UPDATE_STATUS=1
         else
             APT_UPDATE_STATUS=2
-            echo -e "${RED}Error: 'apt update' falló. No se instalarán dependencias del sistema.${NC}"
+            echo -e "${RED}ERROR DEL CLIENTE: apt update falló. No se instalarán dependencias del sistema.${NC}"
             return 1
         fi
     elif [ $APT_UPDATE_STATUS -eq 2 ]; then
         # Si la actualización falló antes, no intentamos instalar más paquetes
-        echo -e "${RED}No se intenta instalar dependencias porque 'apt update' ya falló.${NC}"
+        echo -e "${RED}No se intenta instalar dependencias porque apt update falló.${NC}"
         return 1
     fi
 
@@ -62,7 +62,7 @@ install_system_deps() {
     if apt install -y $deps; then
         return 0
     else
-        echo -e "${RED}Error: No se pudieron instalar las dependencias automáticamente con APT. Por favor, instálalas manualmente: $deps${NC}"
+        echo -e "${RED}ERROR DE CLIENTE: No se pudieron instalar las dependencias automáticamente con APT. Por favor, instálalas manualmente: $deps${NC}"
         return 1
     fi
 }
