@@ -207,21 +207,6 @@ Mantiene el sistema base estable
 
 Permite un ecosistema propio de aplicaciones
 
-
----
-
-📌 Futuro del proyecto
-
-Sandbox de aplicaciones con usuario casata
-
-Sistema de permisos por app
-
-Runtime Python aislado opcional
-
-Verificación de repositorios firmados
-
-Tienda central de aplicaciones Monojo
-
 ---
 
 👥 Colaboradores
