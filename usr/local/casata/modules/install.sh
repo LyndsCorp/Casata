@@ -31,17 +31,38 @@ trap cleanup EXIT
 
 install_system_deps() {
     local deps="$1"
-    
+
     echo -e "${YELLOW}Intentando instalar dependencias: $deps${NC}"
-    
-    if command -v apt &>/dev/null; then
-        if apt update && apt install -y $deps; then
-            return 0
-        fi
+
+    # Si no tenemos apt, no hay nada que hacer
+    if ! command -v apt &>/dev/null; then
+        echo -e "${RED}Error: APT no está disponible.${NC}"
+        return 1
     fi
-    
-    echo -e "${RED}Error: No se pudieron instalar las dependencias automáticamente con APT. Por favor, instálelas manualmente: $deps${NC}"
-    return 1
+
+    # Ejecutar apt update solo la primera vez
+    if [ $APT_UPDATE_STATUS -eq 0 ]; then
+        echo -e "${YELLOW}Ejecutando 'apt update' (solo una vez)...${NC}"
+        if apt update; then
+            APT_UPDATE_STATUS=1
+        else
+            APT_UPDATE_STATUS=2
+            echo -e "${RED}Error: 'apt update' falló. No se instalarán dependencias del sistema.${NC}"
+            return 1
+        fi
+    elif [ $APT_UPDATE_STATUS -eq 2 ]; then
+        # Si la actualización falló antes, no intentamos instalar más paquetes
+        echo -e "${RED}No se intenta instalar dependencias porque 'apt update' ya falló.${NC}"
+        return 1
+    fi
+
+    # Llegados aquí APT_UPDATE_STATUS es 1; ejecutar la instalación
+    if apt install -y $deps; then
+        return 0
+    else
+        echo -e "${RED}Error: No se pudieron instalar las dependencias automáticamente con APT. Por favor, instálelas manualmente: $deps${NC}"
+        return 1
+    fi
 }
 
 install_pip_deps() {
