@@ -1,5 +1,8 @@
 #!/bin/bash
+
 # /usr/local/casata/modules/install.sh
+# Copyright (C) 2026, GPL v3+, Lynds Corp., Aros Legendarios, David Baña Szymaniak
+# Script de instalar aplicaciones en Casata
 
 shopt -s nullglob
 set -euo pipefail
@@ -31,16 +34,51 @@ install_system_deps() {
     
     echo -e "${YELLOW}Intentando instalar dependencias: $deps${NC}"
     
-    # Si apt existe, intentamos actualizar e instalar
     if command -v apt &>/dev/null; then
         if apt update && apt install -y $deps; then
             return 0
         fi
     fi
     
-    # Si llega aquí, es porque apt no existe o falló el comando anterior
     echo -e "${RED}Error: No se pudieron instalar las dependencias automáticamente con APT. Por favor, instálelas manualmente: $deps${NC}"
     return 1
+}
+
+install_pip_deps() {
+    local pkgs="$1"   # lista separada por saltos de línea
+    local venv_path="/usr/local/casata/python-venv"
+    local lock_file="$venv_path/.install.lock"
+    
+    # Crear venv si no existe (verificación con ls)
+    if ! ls "$venv_path/bin/python" >/dev/null 2>&1; then
+        echo -e "${YELLOW}Creando entorno virtual compartido en $venv_path...${NC}"
+        if command -v python3 &>/dev/null; then
+            python3 -m venv "$venv_path" || { echo -e "${RED}Error al crear venv.${NC}"; return 1; }
+        else
+            echo -e "${RED}Error: python3 no encontrado. No se pueden instalar dependencias pip.${NC}"
+            return 1
+        fi
+    fi
+    
+    # Asegurar que el lock file existe
+    touch "$lock_file" 2>/dev/null || { echo -e "${RED}Error: No se puede crear lock file en $lock_file.${NC}"; return 1; }
+    
+    # Convertir lista a array
+    local pip_pkgs=()
+    while IFS= read -r pkg; do
+        [[ -n "$pkg" ]] && pip_pkgs+=("$pkg")
+    done <<< "$pkgs"
+    
+    if [ ${#pip_pkgs[@]} -eq 0 ]; then
+        return 0
+    fi
+    
+    echo -e "${YELLOW}Instalando dependencias Python: ${pip_pkgs[*]}${NC}"
+    flock --exclusive "$lock_file" "$venv_path/bin/pip" install "${pip_pkgs[@]}" || {
+        echo -e "${RED}Error al instalar dependencias pip.${NC}"
+        return 1
+    }
+    return 0
 }
 
 force_remove() {
@@ -58,7 +96,6 @@ force_remove() {
             DEST="${DEST//\$HOME/$HOME}"
             TARGET_LINK="$DEST/$LINK_NAME"
             
-            # Solo eliminamos el enlace si apunta a NUESTRA aplicación (evita borrar cosas de otros por error)
             if [ -L "$TARGET_LINK" ] && [ "$(readlink "$TARGET_LINK")" == "$app_dir/$FILE" ]; then
                 rm -f "$TARGET_LINK"
                 echo -e "   [-] Enlace eliminado: $LINK_NAME"
@@ -73,7 +110,6 @@ ask_overwrite() {
     local app_name="$2"
     local auto_yes="$3"
 
-    # Si se pasó -y, saltarse la pregunta y sobrescribir directamente
     if [ "$auto_yes" -eq 1 ]; then
         echo -e "${YELLOW}Usando -y: Sobrescribiendo '$target' automáticamente.${NC}"
         rm -rf "$target"
@@ -95,24 +131,16 @@ ask_overwrite() {
     fi
 }
 
-# Función para instalar un solo paquete
+# Función para instalar un solo paquete (siempre global)
 install_one() {
     local PKG_NAME="$1"
     local AUTO_YES="$2"
     local DOWNLOAD_ONLY="$3"
-    local USER_INSTALL="$4"
 
-    # Configuración de rutas
-    if [ $USER_INSTALL -eq 1 ]; then
-        APPS_DIR="$HOME/.local/casata/apps"
-        GUIDE_TARGET="GUIDE-USER.json"
-        INSTALL_TYPE="Usuario"
-    else
-        [ "$EUID" -ne 0 ] && { echo -e "${RED}Instalación global requiere root.${NC}"; return 1; }
-        APPS_DIR="$GLOBAL_ROOT/apps"
-        GUIDE_TARGET="GUIDE.json"
-        INSTALL_TYPE="Global"
-    fi
+    # Instalación exclusivamente global
+    [ "$EUID" -ne 0 ] && { echo -e "${RED}Instalación global requiere root.${NC}"; return 1; }
+    APPS_DIR="$GLOBAL_ROOT/apps"
+    GUIDE_TARGET="GUIDE.json"
 
     mkdir -p "$APPS_DIR"
     APP_DIR="$APPS_DIR/${PKG_NAME}"
@@ -136,9 +164,10 @@ install_one() {
         return 1
     fi
 
-    # Leer metadatos
+    # Leer metadatos (nuevo formato: apt y pip)
     REPO_VERSION=$(jq -r '.version // "0.0.0"' "$PKG_FILE")
-    REPO_DEPS=$(jq -r '.dependencies[]? // empty' "$PKG_FILE")
+    APT_DEPS=$(jq -r '.apt[]? // empty' "$PKG_FILE")
+    PIP_DEPS=$(jq -r '.pip[]? // empty' "$PKG_FILE")
 
     # Comprobar si ya está instalado y comparar versiones
     INSTALLED_VERSION=""
@@ -172,40 +201,39 @@ install_one() {
         fi
     fi
 
-    # Gestión de dependencias (Movido arriba del bloque de eliminación)
-    if [ -n "$REPO_DEPS" ]; then
-        echo -e "\n${YELLOW}Dependencias para $PKG_NAME:${NC}"
-        echo "$REPO_DEPS" | sed 's/^/  • /'
+    # Gestión de dependencias APT
+    if [ -n "$APT_DEPS" ]; then
+        echo -e "\n${YELLOW}Dependencias del sistema para $PKG_NAME:${NC}"
+        echo "$APT_DEPS" | sed 's/^/  • /'
         if [ $AUTO_YES -eq 0 ]; then
             read -p "¿Instalar dependencias del sistema? [S/n] " resp < /dev/tty
             if [[ "$resp" =~ ^[Nn] ]]; then
                 echo -e "${YELLOW}Se omitió la instalación de dependencias del sistema.${NC}"
             else
-                install_system_deps "$(echo "$REPO_DEPS" | tr '\n' ' ')" || return 1
+                install_system_deps "$(echo "$APT_DEPS" | tr '\n' ' ')" || return 1
             fi
         else
-            install_system_deps "$(echo "$REPO_DEPS" | tr '\n' ' ')" || return 1
-        fi
-        if [ $USER_INSTALL -eq 1 ]; then
-            MISSING=""
-            for dep in $REPO_DEPS; do
-                if ! dpkg -s "$dep" &>/dev/null; then
-                    MISSING="$MISSING $dep"
-                fi
-            done
-            if [ -n "$MISSING" ]; then
-                echo -e "${RED}Faltan dependencias: $MISSING${NC}"
-                if [ $AUTO_YES -eq 0 ]; then
-                    read -p "¿Continuar sin ellas? [s/N] " resp < /dev/tty
-                    [[ ! "$resp" =~ ^[Ss] ]] && return 1
-                else
-                    echo -e "${YELLOW}Usando -y: Continuando la instalación de forma forzada.${NC}"
-                fi
-            fi
+            install_system_deps "$(echo "$APT_DEPS" | tr '\n' ' ')" || return 1
         fi
     fi
 
-    # Eliminación segura (Solo ocurre si las dependencias no cancelaron la ejecución)
+    # Gestión de dependencias pip
+    if [ -n "$PIP_DEPS" ]; then
+        echo -e "\n${YELLOW}Dependencias Python para $PKG_NAME:${NC}"
+        echo "$PIP_DEPS" | sed 's/^/  • /'
+        if [ $AUTO_YES -eq 0 ]; then
+            read -p "¿Instalar dependencias Python con pip? [S/n] " resp < /dev/tty
+            if [[ "$resp" =~ ^[Nn] ]]; then
+                echo -e "${YELLOW}Se omitió la instalación de dependencias pip.${NC}"
+            else
+                install_pip_deps "$PIP_DEPS" || return 1
+            fi
+        else
+            install_pip_deps "$PIP_DEPS" || return 1
+        fi
+    fi
+
+    # Eliminación segura (solo si las dependencias no cancelaron)
     if [ $NEED_UPDATE -eq 1 ] || [ $NEED_UPDATE -eq 2 ]; then
         echo -e "${YELLOW}Preparando actualización/reinstalación...${NC}"
         force_remove "$APP_DIR" "$GUIDE_TARGET"
@@ -229,7 +257,7 @@ install_one() {
 
     SRC_DIR=$(find "$EXTRACT_DIR" -name "VERSION" -exec dirname {} \; | head -1)
     [ -z "$SRC_DIR" ] && SRC_DIR=$(find "$EXTRACT_DIR" -mindepth 1 -maxdepth 1 -type d | head -1)
-    [ -z "$SRC_DIR" ] && "$SRC_DIR"="$EXTRACT_DIR"
+    [ -z "$SRC_DIR" ] && SRC_DIR="$EXTRACT_DIR"
 
     mv "$SRC_DIR"/* "$APP_DIR/" 2>/dev/null || mv "$SRC_DIR"/.??* "$APP_DIR/" 2>/dev/null || true
     rm -rf "$EXTRACT_DIR" "$ARCHIVE_PATH"
@@ -258,7 +286,6 @@ install_one() {
                     echo -e "   ${YELLOW}[!] Enlace existente de la misma app: $LINK_NAME → se reemplazará.${NC}"
                     rm -f "$TARGET_LINK"
                 else
-                    # CORRECCIÓN: Si el usuario no desea sobrescribir, omitimos este enlace y continuamos
                     if ! ask_overwrite "$TARGET_LINK" "$PKG_NAME" "$AUTO_YES"; then
                         continue
                     fi
@@ -281,7 +308,7 @@ install_one() {
     return 0
 }
 
-# --- INICIO DEL SCRIPT (manejo de múltiples paquetes) ---
+# --- INICIO DEL SCRIPT (manejo de argumentos y router) ---
 if ! command -v jq &>/dev/null || ! command -v wget &>/dev/null; then
     echo -e "${RED}Error: Se requieren 'jq' y 'wget'.${NC}"
     exit 1
@@ -289,15 +316,12 @@ fi
 
 AUTO_YES=0
 DOWNLOAD_ONLY=0
-USER_INSTALL=0
 PACKAGES=()
 
-# Recorrer argumentos separando opciones de paquetes
 for arg in "$@"; do
     case "$arg" in
         -y) AUTO_YES=1 ;;
         -d) DOWNLOAD_ONLY=1 ;;
-        --user) USER_INSTALL=1 ;;
         -*)
             echo -e "${RED}Opción desconocida: $arg${NC}"
             exit 1
@@ -311,93 +335,22 @@ if [ ${#PACKAGES[@]} -eq 0 ]; then
     exit 1
 fi
 
-# --- ACTUALIZACIÓN DE CASATA (solo si el primer paquete es "casata" y no hay otros) ---
+# --- ROUTER: si el único paquete es "casata", delegamos en el nuevo módulo ---
 if [ ${#PACKAGES[@]} -eq 1 ] && [ "${PACKAGES[0]}" == "casata" ]; then
-    echo -e "${GREEN}════════════════════════════════════════${NC}"
-    echo -e "${GREEN}Actualizando Casata${NC}"
-    echo -e "${GREEN}════════════════════════════════════════${NC}"
-    [ "$EUID" -ne 0 ] && { echo -e "${RED}Requiere root.${NC}"; exit 1; }
-
-    # Obtener versión local
-    LOCAL_VERSION="desconocida"
-    if [ -f "$GLOBAL_ROOT/VERSION" ]; then
-        LOCAL_VERSION=$(cat "$GLOBAL_ROOT/VERSION")
-    fi
-
-    # Obtener versión remota desde GitHub
-    REMOTE_VERSION="desconocida"
-    REMOTE_URL="https://raw.githubusercontent.com/LyndsCorp/Casata/main/usr/local/casata/VERSION"
-    echo -e "${YELLOW}Consultando versión remota...${NC}"
-    if wget -q --timeout=10 -O /tmp/casata_remote_version "$REMOTE_URL" 2>/dev/null; then
-        REMOTE_VERSION=$(cat /tmp/casata_remote_version 2>/dev/null | tr -d '[:space:]')
-        rm -f /tmp/casata_remote_version
-    fi
-
-    echo -e "${YELLOW}Versión local:  $LOCAL_VERSION${NC}"
-    echo -e "${YELLOW}Versión remota: $REMOTE_VERSION${NC}"
-
-    # Comparar versiones (si están disponibles)
-    if [ "$LOCAL_VERSION" != "desconocida" ] && [ "$REMOTE_VERSION" != "desconocida" ]; then
-        if [ "$LOCAL_VERSION" = "$REMOTE_VERSION" ]; then
-            echo -e "${GREEN}Ya tienes la última versión.${NC}"
-            if [ $AUTO_YES -eq 0 ]; then
-                read -p "¿Reinstalar igualmente? [s/N] " resp < /dev/tty
-                [[ ! "$resp" =~ ^[sSyY] ]] && exit 0
-            else
-                echo -e "${YELLOW}Usando -y: se reinstalará.${NC}"
-            fi
-        else
-            echo -e "${GREEN}Hay una actualización disponible ($REMOTE_VERSION).${NC}"
-        fi
-    fi
-
-    if [ $AUTO_YES -eq 0 ]; then
-        read -p "¿Descargar e instalar la última versión? [S/n] " resp < /dev/tty
-        [[ "$resp" =~ ^[Nn] ]] && exit 0
-    fi
-
-    TEMP_DIR=$(mktemp -d)
-    ZIP_URL="https://github.com/LyndsCorp/Casata/archive/refs/heads/main.zip"
-    echo -e "${YELLOW}Descargando desde GitHub...${NC}"
-    if ! wget -q --show-progress -O "$TEMP_DIR/casata.zip" "$ZIP_URL"; then
-        echo -e "${RED}Error al descargar la actualización.${NC}"
-        exit 1
-    fi
-    unzip -q "$TEMP_DIR/casata.zip" -d "$TEMP_DIR"
-    EXTRACTED=$(find "$TEMP_DIR" -maxdepth 1 -type d -name "Casata-*" | head -1)
-    if [ -z "$EXTRACTED" ] || [ ! -d "$EXTRACTED/usr" ]; then
-        echo -e "${RED}Error: Estructura del ZIP inválida.${NC}"
-        exit 1
-    fi
-
-    cp -f "$EXTRACTED/usr/bin/casata" /usr/bin/casata
-    chmod +x /usr/bin/casata
-    rm -rf "$GLOBAL_ROOT/modules"
-    cp -r "$EXTRACTED/usr/local/casata/modules" "$GLOBAL_ROOT/"
-    chmod +x "$GLOBAL_ROOT"/modules/*.sh
-    cp -f "$EXTRACTED/usr/local/casata/"{HELP,VERSION,WELCOME} "$GLOBAL_ROOT/" 2>/dev/null
-
-    # ===== FUSIÓN DE REPOSITORIOS (sin borrar los locales) =====
-    if [ -d "$EXTRACTED/usr/local/casata/repos" ]; then
-        echo -e "${YELLOW}Fusionando repositorios oficiales (se conservan los personalizados)...${NC}"
-        cp -r "$EXTRACTED/usr/local/casata/repos/." "$GLOBAL_ROOT/repos/"
-        echo -e "${GREEN}Repositorios actualizados correctamente.${NC}"
-    else
-        echo -e "${YELLOW}Aviso: No se encontró la carpeta 'repos' en la actualización; se mantiene la versión actual.${NC}"
-    fi
-    # ==========================================================
-
-    echo -e "${GREEN}Casata actualizado correctamente a la versión $REMOTE_VERSION.${NC}"
-    exit 0
+    echo -e "${GREEN}Redirigiendo a la actualización de Casata...${NC}"
+    exec "$GLOBAL_ROOT/modules/install-casata.sh" "$@"
+    # Si exec falla:
+    echo -e "${RED}Error: No se pudo ejecutar el módulo de actualización de Casata.${NC}"
+    exit 1
 fi
 
-# --- INSTALACIÓN NORMAL DE MÚLTIPLES PAQUETES ---
+# --- Instalación normal de aplicaciones ---
 FAILED=()
 for PKG in "${PACKAGES[@]}"; do
     echo -e "\n${GREEN}========================================${NC}"
     echo -e "${GREEN}Instalando: $PKG${NC}"
     echo -e "${GREEN}========================================${NC}"
-    if install_one "$PKG" "$AUTO_YES" "$DOWNLOAD_ONLY" "$USER_INSTALL"; then
+    if install_one "$PKG" "$AUTO_YES" "$DOWNLOAD_ONLY"; then
         echo -e "${GREEN}✔ $PKG instalado correctamente.${NC}"
     else
         echo -e "${RED}✖ Falló la instalación de $PKG.${NC}"

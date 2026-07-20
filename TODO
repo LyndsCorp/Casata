@@ -1,0 +1,45 @@
+
+TODO (To do, cosas por hacer)
+Roadmap de las versiones de Casata (estamos en la 1.1.3.4.3):
+
+
+Para Casata 1.2
+Que las aplicaciones puedan instalar dependencias con pip en un venv compartido en /usr/local/casata/python-venv/.
+Para evitar que 2 procesos de pip con Casata instalen algo en el venv al mismo tiempo, usamos flock para bloquearlo.
+Ahora en los JSON de metadata, las dependencias son:
+apt
+pip
+Cuando antes eran:
+dependencies (con APT)
+También, si no existe el venv, lo crea. Verifica que existe el venv con un simple ls.
+Además de eso, el script se divide para hacerlo más fácil de mantener. Es decir, lo de install casata que antes lo actualizaba, ahora es un script en /usr/local/casata/modules/install-casata.sh y el install.sh solo instala las aplicaciones y sirve como router si la aplicación a instalar se llama casata.
+Y por último, la instalación por usuario se quitó, principalmente porque no era tan simple hacer los .desktop a los usuarios y que su icono apunte a un icono en una ruta relativa.
+Nota: las dependencias con pip no declaran una versión exacta, solo la dependencia. Así como pip install torch por ejemplo.
+
+Para Casata 1.2.1
+Que al hacer sudo casata update, al detectar un singrepo que intenta sobreescribir a otro singrepo, advierta que intenta sobreescribir un repo y que lo advierta con s/N. Para esto, también que primero actualice los metarepos indicados en /usr/local/casata/repos/metarepos/PRIORITY, en el orden en el que salen. Después de procesar estos en PRIORITY, procesa el resto de forma normal.
+Además de eso, ninguna app puede crear symlinks en /usr/local/casata/, /home/, /boot/, /root/, /dev/ y /sys/ ni tampoco sobreescribir binarios críticos del sistema como /usr/bin/casata, /usr/bin/apt, o todos los binarios de utilscore o utils-linux, por motivos de seguridad. En una variable del módulo install.sh se encuentra la lista de carpetas protegidas y en otra variable los archivos protegidos.
+
+Para Casata 1.2.2
+En /usr/local/casata/repos/singrepos/PRIORITY se indican los singrepos que pueden mover (con un GUIDE.sh) archivos del sistema. Esto es así para sudo casata install cachyos-kernel y que haga un backup del anterior kernel. 
+Se tiene que hacer con una advertencia:
+```
+Este paquete puede modificar archivos del sistema.
+
+Repositorio autorizado:
+cachyos-kernel
+
+¿Continuar? (S/n)
+```
+Y si pone S, ejecuta el GUIDE.sh
+
+Para Casata 1.3
+Las aplicaciones al instalarse pueden instalar dependencias con Pacman, DNF y Casata, además de APT y PIP de antes. Eso es así porque el mismo paquete puede tener diferente nombre en Pacman que en APT por ejemplo.
+En el JSON de data/singrepo.json, antes solo salía dependences y ya. Ahora deberá salir:
+apt
+pacman
+dnf
+pip
+casata
+No solo dependences, que eso era solo para APT.
+Con Casata, lo que hacen es instalar la dependencia con casata install.
