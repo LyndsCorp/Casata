@@ -30,18 +30,12 @@ Casata utiliza la siguiente estructura base:
 ```
 /usr/local/casata/
 │
-├── apps/              # Aplicaciones instaladas (modo global)
+├── apps/              # Aplicaciones instaladas
 ├── repos/             # Repositorios y metarepos
 │   ├── metarepos/
 │   └── singrepos/
-├── data/                # Base de datos local de paquetes
+├── data/              # Base de datos local de paquetes
 └── modules/           # Núcleo del sistema Casata
-
-Modo usuario:
-
-~/.local/casata/
-├── apps/              # Aplicaciones instaladas por usuario
-└── data/                # Base de datos del usuario
 ```
 
 ---
@@ -90,16 +84,10 @@ Define cómo se integra la aplicación en el sistema:
 
 ⚙️ Instalación de Casata
 
-Instalación global:
+Instalación:
 ```
 
-sudo casata install mc-lan
-```
-
-Instalación de usuario:
-```
-
-casata install --user mc-lan
+casata install mc-lan
 ```
 
 ---
@@ -133,14 +121,14 @@ Dependencias: python3, python3-pil
 
 ❌ Eliminar paquetes
 
-sudo casata remove mc-lan
+casata remove mc-lan
 
 
 ---
 
 🔄 Actualizar repositorios
 
-sudo casata update
+casata update
 
 
 ---
@@ -179,25 +167,17 @@ casata add singrepo https://example.com/mc-lan.json
 
 1. Buscar paquete en repositorios
 
-
 2. Descargar singrepo
-
 
 3. Descargar aplicación
 
-
 4. Extraer archivos
-
 
 5. Crear estructura en /usr/local/casata/apps
 
-
 6. Crear enlaces definidos en GUIDE.json
 
-
 7. Registrar en base de datos
-
-
 
 
 ---
@@ -211,9 +191,6 @@ Prevención de sobrescritura de archivos del sistema
 Verificación de enlaces existentes
 
 Abortado automático en conflictos
-
-Separación entre instalación global y usuario
-
 
 
 ---
@@ -229,7 +206,6 @@ Evita complejidad de paquetes tradicionales
 Mantiene el sistema base estable
 
 Permite un ecosistema propio de aplicaciones
-
 
 
 ---
