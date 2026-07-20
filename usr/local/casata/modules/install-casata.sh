@@ -2,7 +2,7 @@
 
 # /usr/local/casata/modules/install-casata.sh
 # Copyright (C) 2026, GPL v3+, Lynds Corp., Aros Legendarios, David Baña Szymaniak
-# Script de actualización de Casata (se ejecuta desde install.sh)
+# Script de actualización de Casata
 
 shopt -s nullglob
 set -euo pipefail

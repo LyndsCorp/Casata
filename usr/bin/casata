@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # ==========================================
-# Gestor de Aplicaciones Casata
+# Gestor de Aplicaciones Casata 1.2
 # Desarrollado por David Baña Szymaniak para LyndsOS
-# Licencia GPL v3, Software Aros Legendarios, David Baña Szymaniak
+# Copyright (C) 2026, GPL v3+, Lynds Corp., Aros Legendarios, David Baña Szymaniak
 # ==========================================
 
 GREEN='\033[0;32m'
@@ -43,26 +43,15 @@ run_module() {
 log_command() {
     local cmd="$1"
     local user="$USER"
-    local log_file=""
-    
-    if [ "$EUID" -eq 0 ]; then
-        log_file="/usr/local/casata/HISTORY.log"
-    else
-        log_file="$HOME/.local/casata/HISTORY.log"
-    fi
-    
-    local no_log_flag=""
-    if [ "$EUID" -eq 0 ]; then
-        no_log_flag="/usr/local/casata/NO_LOG"
-    else
-        no_log_flag="$HOME/.local/casata/NO_LOG"
-    fi
-    
+    local log_file="/usr/local/casata/HISTORY.log"   # ahora todo es global
+
+    local no_log_flag="/usr/local/casata/NO_LOG"
+
     # Si el flag de desactivación existe, no registrar
     if [ -f "$no_log_flag" ]; then
         return 0
     fi
-    
+
     mkdir -p "$(dirname "$log_file")"
     local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
     echo "[$timestamp] $user $cmd" >> "$log_file"
@@ -123,12 +112,14 @@ case "$COMMAND" in
 
     install)
         [ -z "$1" ] && { echo -e "${RED}Error: Faltan argumentos.${NC}"; exit 1; }
+        require_root                     # <-- ahora la instalación es global
         log_command "$FULL_COMMAND"
         run_module "install.sh" "$@"
         ;;
 
     remove)
         [ -z "$1" ] && { echo -e "${RED}Error: Faltan argumentos.${NC}"; exit 1; }
+        require_root                     # <-- eliminación global
         log_command "$FULL_COMMAND"
         run_module "remove.sh" "$@"
         ;;
