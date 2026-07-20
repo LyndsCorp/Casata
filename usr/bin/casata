@@ -13,9 +13,6 @@ NC='\033[0m'
 CASATA_ROOT="/usr/local/casata"
 MODULES_DIR="$CASATA_ROOT/modules"
 
-# Asegurar que todos los módulos sean ejecutables
-[ -d "$MODULES_DIR" ] && chmod +x "$MODULES_DIR"/* 2>/dev/null
-
 VERSION_FILE="$CASATA_ROOT/VERSION"
 HELP_FILE="$CASATA_ROOT/HELP"
 WELCOME_FILE="$CASATA_ROOT/WELCOME"
