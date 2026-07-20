@@ -86,20 +86,20 @@ for REPO_FILE in "$METAREPOS_DIR"/*.json; do
                 chmod 644 "$SINGREPOS_DIR/${PKG_NAME}.json"
                 echo -e "     ${GREEN}✓ Singrepo actualizado${NC}"
             else
-                echo -e "     ${RED}✗ JSON inválido (el archivo descargado no es JSON válido).${NC}"
+                echo -e "     ${RED}✗ ERROR DEL SERVIDOR: JSON inválido (el archivo descargado no es JSON válido).${NC}"
                 rm -f "$TEMP_SING"
                 ((ERRORES++))
                 continue
             fi
         else
-            echo -e "     ${RED}✗ Error del servidor al descargar el singrepo.${NC}"
+            echo -e "     ${RED}✗ ERROR DEL SERVIDOR al descargar el singrepo.${NC}"
             rm -f "$TEMP_SING"
             ((ERRORES++))
             continue
         fi
 
         DATA_URL=$(jq -r '.data_url // empty' "$SINGREPOS_DIR/${PKG_NAME}.json")
-        [ -z "$DATA_URL" ] && { echo -e "     ${YELLOW}⚠ Sin data_url${NC}"; continue; }
+        [ -z "$DATA_URL" ] && { echo -e "     ${YELLOW}⚠ ERROR DEL SERVIDOR: Sin data_url${NC}"; continue; }
 
         echo -n "     ↳ Descargando metadatos... "
         TEMP_DATA=$(mktemp /tmp/casata_update_XXXXXX.tmp)
@@ -109,7 +109,7 @@ for REPO_FILE in "$METAREPOS_DIR"/*.json; do
                 chmod 644 "$DATA_DIR/${PKG_NAME}.json"
                 echo -e "${GREEN}OK${NC}"
             else
-                echo -e "${RED}FALLO (JSON inválido)${NC}"
+                echo -e "${RED}ERROR DEL SERVIDOR: FALLO JSON inválido o corrupto${NC}"
                 rm -f "$TEMP_DATA"
                 ((ERRORES++))
             fi
