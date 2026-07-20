@@ -2,7 +2,7 @@
 TODO (To do, cosas por hacer)
 Roadmap de las versiones de Casata (estamos en la 1.1.3.4.3):
 
-
+### HECHO :)
 Para Casata 1.2
 Que las aplicaciones puedan instalar dependencias con pip en un venv compartido en /usr/local/casata/python-venv/.
 Para evitar que 2 procesos de pip con Casata instalen algo en el venv al mismo tiempo, usamos flock para bloquearlo.
@@ -15,6 +15,7 @@ También, si no existe el venv, lo crea. Verifica que existe el venv con un simp
 Además de eso, el script se divide para hacerlo más fácil de mantener. Es decir, lo de install casata que antes lo actualizaba, ahora es un script en /usr/local/casata/modules/install-casata.sh y el install.sh solo instala las aplicaciones y sirve como router si la aplicación a instalar se llama casata.
 Y por último, la instalación por usuario se quitó, principalmente porque no era tan simple hacer los .desktop a los usuarios y que su icono apunte a un icono en una ruta relativa.
 Nota: las dependencias con pip no declaran una versión exacta, solo la dependencia. Así como pip install torch por ejemplo.
+###
 
 Para Casata 1.2.1
 Que al hacer sudo casata update, al detectar un singrepo que intenta sobreescribir a otro singrepo, advierta que intenta sobreescribir un repo y que lo advierta con s/N. Para esto, también que primero actualice los metarepos indicados en /usr/local/casata/repos/metarepos/PRIORITY, en el orden en el que salen. Después de procesar estos en PRIORITY, procesa el resto de forma normal.

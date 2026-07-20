@@ -60,7 +60,7 @@ install_system_deps() {
     if apt install -y $deps; then
         return 0
     else
-        echo -e "${RED}Error: No se pudieron instalar las dependencias automáticamente con APT. Por favor, instálelas manualmente: $deps${NC}"
+        echo -e "${RED}Error: No se pudieron instalar las dependencias automáticamente con APT. Por favor, instálalas manualmente: $deps${NC}"
         return 1
     fi
 }
