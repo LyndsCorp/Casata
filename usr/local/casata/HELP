@@ -1,41 +1,45 @@
          CASATA HELP
 ==================================
 
-COMANDOS (resumen):
+COMANDOS:
 
-  add singrepo <URL>      → Añade un paquete individual
-  add repo <URL>          → Añade un metarepositorio
-  add oficial             → Usa el repositorio maestro
+  add singrepo <URL>       → Añade un singrepo (una app)
+  add repo <URL>           → Añade un metarepo (un índice de apps)
+  add oficial              → Añade los metarepos oficiales, mantenidos por Lynds Corp.
+  add forge                → Añade los metarepos de desarrolladores verificados, supervisados por Lynds Corp. y open source
+  add community            → Añade los metarepos de la comunidad, no son supervisados por Lynds Corp.
+  add others               → Añade los metarepos que no encajan en ninguna de las categorías anteriores
 
-  install <pkg...> [-y] [-d] [--user]
-  remove  <pkg...> [-y] [--user]
+  install <apps> [-y] [-d] → -d = download, no lo instala (crear symlinks a rutas del sistema)
+  remove  <apps> [-y]      → -y = yes, aceptar todo. Perfecto para automatización
 
-  list [-v] [-d]          → Muestra instalados (versión/descripción)
+  list [-v] [-d]           → Muestra las apps instaladas (v = versión|d = descripción)
 
-  info <pkg> [-l] [-r]    → Datos del paquete (licencia/readme)
+  info <app> [-l] [-r]     → Muestra información sobre la app (l = LICENSE|r = README.md)
 
-  search <texto>          → Busca en la base de datos local
+  search <texto>           → Busca en la base de datos local
 
-  update                  → Actualiza índices de repositorios
+  update                   → Actualiza índices de metarepos y la base de datos local
 
-  upgrade [-y] [--user|--system] → Actualiza paquetes instalados
+  upgrade [-y]             → Actualiza paquetes instalados. y = yes, aceptar todo
 
-  history [--lines N] [--clear] [--disable|--enable] [--user nom]
-                          → Historial de operaciones
+  history [--lines N]      → Te lee el historial las líneas indicadas en N (N = número) 
+          [--clear]        → Limpia todo el historial
+          [--disable|--enable] → Desactiva|activa el historial
+          [--user nombre]  → Lee el historial completo de un usuario en concreto
+          []               → Al no poner nada, te lee el historial completo de tu usuario (si lo ejecutas con sudo, es del sistema)
+  
+  clean                   → Limpia huérfanos (singrepos/datos no referenciados)
 
-  clean                   → Elimina huérfanos (singrepos/datos no referenciados)
-
-  show                    → Resumen de apps instaladas (sistema + usuario)
+  show                    → Resumen de apps instaladas
 
 OPCIONES COMUNES:
   -y          → responde "sí" a todo
-  --user      → opera en ámbito de usuario (~/.local/casata)
   -d          → solo descarga (install)
   -l / -r     → licencia / readme (info)
   -v / -d     → versión / descripción (list)
 
 RUTAS:
   Global: /usr/local/casata/{apps,data,repos}
-  Usuario: ~/.local/casata/apps
 
 Requiere sudo para operaciones globales.
