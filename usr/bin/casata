@@ -1,9 +1,11 @@
 #!/bin/bash
 
 # ==========================================
-# Gestor de Aplicaciones Casata 1.2
+# Gestor de Aplicaciones Casata 1.2: Python es bienvenido
 # Desarrollado por David Baña Szymaniak para LyndsOS
 # Licencia GPL v3, Software Aros Legendarios, David Baña Szymaniak
+#
+# Casata - El dios del tiempo: el aro verde
 # ==========================================
 
 GREEN='\033[0;32m'
