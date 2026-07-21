@@ -2,7 +2,12 @@
 
 # /usr/local/casata/modules/install.sh
 # Copyright (C) 2026, GPL v3+, Lynds Corp., Aros Legendarios, David Baña Szymaniak
-# Script de instalar aplicaciones en Casata
+# Script de instalar aplicaciones en Casata 1.2.1
+#
+# NOVEDADES DE SEGURIDAD:
+#   - Impide enlaces en directorios protegidos definidos en PROTECTED_DIRS.
+#   - Bloquea sobrescribir binarios críticos definidos en PROTECTED_FILES.
+#   - Las rutas se resuelven canónicamente (realpath -m) para evitar bypass mediante enlaces simbólicos del sistema (p. ej. /bin -> /usr/bin).
 
 shopt -s nullglob
 set -euo pipefail
@@ -21,6 +26,229 @@ APT_UPDATE_STATUS=0
 TEMP_DIR=""
 EXTRACT_DIR=""
 
+# ------------------------------------------------------------
+# Directorios protegidos donde NUNCA se puede crear un enlace
+# ------------------------------------------------------------
+PROTECTED_DIRS=(
+    "/usr/local/casata"
+    "/home"
+    "/boot"
+    "/root"
+    "/dev"
+    "/sys"
+)
+
+PROTECTED_FILES=(
+    # --- Instaladores ---
+    "/usr/bin/casata"
+    "/usr/bin/apt"
+    "/usr/bin/pacman"
+    "/usr/bin/dnf"
+    "/usr/bin/wget"
+    "/usr/bin/curl"
+
+    # --- Dependencias de Casata ---
+    "/usr/bin/jq"
+    "/usr/bin/tar"
+    "/usr/bin/unzip"
+    "/usr/bin/zip"
+
+    # --- GNU coreutils ---
+    "/usr/bin/basename"
+    "/usr/bin/cat"
+    "/usr/bin/chgrp"
+    "/usr/bin/chmod"
+    "/usr/bin/chown"
+    "/usr/bin/cksum"
+    "/usr/bin/comm"
+    "/usr/bin/cp"
+    "/usr/bin/csplit"
+    "/usr/bin/cut"
+    "/usr/bin/date"
+    "/usr/bin/dd"
+    "/usr/bin/df"
+    "/usr/bin/dir"
+    "/usr/bin/dircolors"
+    "/usr/bin/dirname"
+    "/usr/bin/du"
+    "/usr/bin/echo"
+    "/usr/bin/env"
+    "/usr/bin/expand"
+    "/usr/bin/expr"
+    "/usr/bin/factor"
+    "/usr/bin/false"
+    "/usr/bin/fmt"
+    "/usr/bin/fold"
+    "/usr/bin/groups"
+    "/usr/bin/head"
+    "/usr/bin/hostid"
+    "/usr/bin/id"
+    "/usr/bin/install"
+    "/usr/bin/join"
+    "/usr/bin/kill"
+    "/usr/bin/link"
+    "/usr/bin/ln"
+    "/usr/bin/logname"
+    "/usr/bin/ls"
+    "/usr/bin/md5sum"
+    "/usr/bin/mkdir"
+    "/usr/bin/mkfifo"
+    "/usr/bin/mknod"
+    "/usr/bin/mktemp"
+    "/usr/bin/mv"
+    "/usr/bin/nice"
+    "/usr/bin/nl"
+    "/usr/bin/nohup"
+    "/usr/bin/nproc"
+    "/usr/bin/numfmt"
+    "/usr/bin/od"
+    "/usr/bin/paste"
+    "/usr/bin/pathchk"
+    "/usr/bin/pinky"
+    "/usr/bin/pr"
+    "/usr/bin/printenv"
+    "/usr/bin/printf"
+    "/usr/bin/ptx"
+    "/usr/bin/pwd"
+    "/usr/bin/readlink"
+    "/usr/bin/realpath"
+    "/usr/bin/rm"
+    "/usr/bin/rmdir"
+    "/usr/bin/runcon"
+    "/usr/bin/seq"
+    "/usr/bin/sha1sum"
+    "/usr/bin/sha224sum"
+    "/usr/bin/sha256sum"
+    "/usr/bin/sha384sum"
+    "/usr/bin/sha512sum"
+    "/usr/bin/shred"
+    "/usr/bin/shuf"
+    "/usr/bin/sleep"
+    "/usr/bin/sort"
+    "/usr/bin/split"
+    "/usr/bin/stat"
+    "/usr/bin/stdbuf"
+    "/usr/bin/stty"
+    "/usr/bin/sum"
+    "/usr/bin/tac"
+    "/usr/bin/tail"
+    "/usr/bin/tee"
+    "/usr/bin/test"
+    "/usr/bin/timeout"
+    "/usr/bin/touch"
+    "/usr/bin/tr"
+    "/usr/bin/true"
+    "/usr/bin/tsort"
+    "/usr/bin/tty"
+    "/usr/bin/uname"
+    "/usr/bin/unexpand"
+    "/usr/bin/uniq"
+    "/usr/bin/unlink"
+    "/usr/bin/users"
+    "/usr/bin/vdir"
+    "/usr/bin/wc"
+    "/usr/bin/who"
+    "/usr/bin/whoami"
+    "/usr/bin/yes"
+    "/usr/bin/["
+
+    # --- util-linux ---
+    "/usr/bin/addpart"
+    "/usr/bin/agetty"
+    "/usr/bin/blkdiscard"
+    "/usr/bin/blkid"
+    "/usr/bin/blockdev"
+    "/usr/bin/cal"
+    "/usr/bin/chcpu"
+    "/usr/bin/chmem"
+    "/usr/bin/choom"
+    "/usr/bin/chrt"
+    "/usr/bin/col"
+    "/usr/bin/colcrt"
+    "/usr/bin/colrm"
+    "/usr/bin/column"
+    "/usr/bin/ctrlaltdel"
+    "/usr/bin/dmesg"
+    "/usr/bin/eject"
+    "/usr/bin/fallocate"
+    "/usr/bin/fincore"
+    "/usr/bin/findmnt"
+    "/usr/bin/flock"
+    "/usr/bin/getopt"
+    "/usr/bin/hexdump"
+    "/usr/bin/hwclock"
+    "/usr/bin/ionice"
+    "/usr/bin/ipcmk"
+    "/usr/bin/ipcrm"
+    "/usr/bin/ipcs"
+    "/usr/bin/isosize"
+    "/usr/bin/killall"
+    "/usr/bin/last"
+    "/usr/bin/lastb"
+    "/usr/bin/ldattach"
+    "/usr/bin/logger"
+    "/usr/bin/login"
+    "/usr/bin/look"
+    "/usr/bin/lsblk"
+    "/usr/bin/lscpu"
+    "/usr/bin/lsipc"
+    "/usr/bin/lslocks"
+    "/usr/bin/lslogins"
+    "/usr/bin/lsns"
+    "/usr/bin/mcookie"
+    "/usr/bin/mesg"
+    "/usr/bin/mkfs"
+    "/usr/bin/mkswap"
+    "/usr/bin/mount"
+    "/usr/bin/mountpoint"
+    "/usr/bin/namei"
+    "/usr/bin/nsenter"
+    "/usr/bin/pivot_root"
+    "/usr/bin/partx"
+    "/usr/bin/prlimit"
+    "/usr/bin/raw"
+    "/usr/bin/readprofile"
+    "/usr/bin/rename"
+    "/usr/bin/renice"
+    "/usr/bin/rev"
+    "/usr/bin/rfkill"
+    "/usr/bin/runuser"
+    "/usr/bin/script"
+    "/usr/bin/scriptreplay"
+    "/usr/bin/setarch"
+    "/usr/bin/setpriv"
+    "/usr/bin/setterm"
+    "/usr/bin/su"
+    "/usr/bin/swaplabel"
+    "/usr/bin/swapoff"
+    "/usr/bin/swapon"
+    "/usr/bin/taskset"
+    "/usr/bin/ul"
+    "/usr/bin/unshare"
+    "/usr/bin/utmpdump"
+    "/usr/bin/uclampset"
+    "/usr/bin/wall"
+    "/usr/bin/wdctl"
+    "/usr/bin/whereis"
+    "/usr/bin/wipefs"
+    "/usr/bin/write"
+    "/usr/bin/zramctl"
+)
+
+# ------------------------------------------------------------
+# Función auxiliar: resolver ruta canónica (con fallback)
+# ------------------------------------------------------------
+canonical_path() {
+    local path="$1"
+    if command -v realpath &>/dev/null; then
+        realpath -m "$path" 2>/dev/null || echo "$path"
+    else
+        # Fallback si realpath no existe (raro, pero por seguridad)
+        echo "$path"
+    fi
+}
+
+# ------------------------------------------------------------
 cleanup() {
     if [ -n "$TEMP_DIR" ] && [ -d "$TEMP_DIR" ]; then
         rm -rf "$TEMP_DIR"
@@ -36,13 +264,11 @@ install_system_deps() {
 
     echo -e "${YELLOW}Intentando instalar dependencias: $deps${NC}"
 
-    # Si no tenemos apt, no hay nada que hacer
     if ! command -v apt &>/dev/null; then
         echo -e "${RED}Error: APT no está disponible.${NC}"
         return 1
     fi
 
-    # Ejecutar apt update solo la primera vez
     if [ $APT_UPDATE_STATUS -eq 0 ]; then
         echo -e "${YELLOW}Ejecutando apt update...${NC}"
         if apt update; then
@@ -53,12 +279,10 @@ install_system_deps() {
             return 1
         fi
     elif [ $APT_UPDATE_STATUS -eq 2 ]; then
-        # Si la actualización falló antes, no intentamos instalar más paquetes
         echo -e "${RED}No se intenta instalar dependencias porque apt update falló.${NC}"
         return 1
     fi
 
-    # Llegados aquí APT_UPDATE_STATUS es 1; ejecutar la instalación
     if apt install -y $deps; then
         return 0
     else
@@ -68,11 +292,10 @@ install_system_deps() {
 }
 
 install_pip_deps() {
-    local pkgs="$1"   # lista separada por saltos de línea
+    local pkgs="$1"
     local venv_path="/usr/local/casata/python-venv"
     local lock_file="$venv_path/.install.lock"
-    
-    # Crear venv si no existe (verificación con ls)
+
     if ! ls "$venv_path/bin/python" >/dev/null 2>&1; then
         echo -e "${YELLOW}Creando entorno virtual compartido en $venv_path...${NC}"
         if command -v python3 &>/dev/null; then
@@ -82,20 +305,18 @@ install_pip_deps() {
             return 1
         fi
     fi
-    
-    # Asegurar que el lock file existe
+
     touch "$lock_file" 2>/dev/null || { echo -e "${RED}Error: No se puede crear lock file en $lock_file.${NC}"; return 1; }
-    
-    # Convertir lista a array
+
     local pip_pkgs=()
     while IFS= read -r pkg; do
         [[ -n "$pkg" ]] && pip_pkgs+=("$pkg")
     done <<< "$pkgs"
-    
+
     if [ ${#pip_pkgs[@]} -eq 0 ]; then
         return 0
     fi
-    
+
     echo -e "${YELLOW}Instalando dependencias Python: ${pip_pkgs[*]}${NC}"
     flock --exclusive "$lock_file" "$venv_path/bin/pip" install "${pip_pkgs[@]}" || {
         echo -e "${RED}Error al instalar dependencias pip.${NC}"
@@ -114,11 +335,11 @@ force_remove() {
             LINK_NAME=$(echo "$item" | jq -r '.name')
             FILE=$(echo "$item" | jq -r '.file')
             [ "$DEST" == "null" ] || [ "$LINK_NAME" == "null" ] || [ "$FILE" == "null" ] && continue
-            
+
             DEST="${DEST/#\~/$HOME}"
             DEST="${DEST//\$HOME/$HOME}"
             TARGET_LINK="$DEST/$LINK_NAME"
-            
+
             if [ -L "$TARGET_LINK" ] && [ "$(readlink "$TARGET_LINK")" == "$app_dir/$FILE" ]; then
                 rm -f "$TARGET_LINK"
                 echo -e "   [-] Enlace eliminado: $LINK_NAME"
@@ -160,7 +381,6 @@ install_one() {
     local AUTO_YES="$2"
     local DOWNLOAD_ONLY="$3"
 
-    # Instalación exclusivamente global
     [ "$EUID" -ne 0 ] && { echo -e "${RED}Instalación global requiere root.${NC}"; return 1; }
     APPS_DIR="$GLOBAL_ROOT/apps"
     GUIDE_TARGET="GUIDE.json"
@@ -168,7 +388,6 @@ install_one() {
     mkdir -p "$APPS_DIR"
     APP_DIR="$APPS_DIR/${PKG_NAME}"
 
-    # Verificar que el paquete esté indexado
     SINGREPO_FILE="$GLOBAL_ROOT/repos/singrepos/${PKG_NAME}.json"
     if [ ! -f "$SINGREPO_FILE" ]; then
         echo -e "${RED}Error: El paquete '$PKG_NAME' no está indexado.${NC}"
@@ -187,12 +406,10 @@ install_one() {
         return 1
     fi
 
-    # Leer metadatos (nuevo formato: apt y pip)
     REPO_VERSION=$(jq -r '.version // "0.0.0"' "$PKG_FILE")
     APT_DEPS=$(jq -r '.apt[]? // empty' "$PKG_FILE")
     PIP_DEPS=$(jq -r '.pip[]? // empty' "$PKG_FILE")
 
-    # Comprobar si ya está instalado y comparar versiones
     INSTALLED_VERSION=""
     NEED_UPDATE=0
     if [ -d "$APP_DIR" ]; then
@@ -224,7 +441,6 @@ install_one() {
         fi
     fi
 
-    # Gestión de dependencias APT
     if [ -n "$APT_DEPS" ]; then
         echo -e "\n${YELLOW}Dependencias del sistema para $PKG_NAME:${NC}"
         echo "$APT_DEPS" | sed 's/^/  • /'
@@ -240,7 +456,6 @@ install_one() {
         fi
     fi
 
-    # Gestión de dependencias pip
     if [ -n "$PIP_DEPS" ]; then
         echo -e "\n${YELLOW}Dependencias Python para $PKG_NAME:${NC}"
         echo "$PIP_DEPS" | sed 's/^/  • /'
@@ -256,13 +471,11 @@ install_one() {
         fi
     fi
 
-    # Eliminación segura (solo si las dependencias no cancelaron)
     if [ $NEED_UPDATE -eq 1 ] || [ $NEED_UPDATE -eq 2 ]; then
         echo -e "${YELLOW}Preparando actualización/reinstalación...${NC}"
         force_remove "$APP_DIR" "$GUIDE_TARGET"
     fi
 
-    # Descarga y extracción
     mkdir -p "$APP_DIR"
     ARCHIVE_NAME=$(basename "$DOWNLOAD_URL" | cut -d '?' -f1)
     ARCHIVE_PATH="$APP_DIR/$ARCHIVE_NAME"
@@ -288,7 +501,9 @@ install_one() {
 
     [ $DOWNLOAD_ONLY -eq 1 ] && { echo -e "${YELLOW}Descargado en $APP_DIR (sin enlaces).${NC}"; return 0; }
 
-    # Crear enlaces simbólicos
+    # ------------------------------------------------
+    # Crear enlaces simbólicos CON PROTECCIONES ACTIVAS
+    # ------------------------------------------------
     echo -e "${YELLOW}Configurando enlaces...${NC}"
     GUIDE_FILE="$APP_DIR/$GUIDE_TARGET"
     if [ -f "$GUIDE_FILE" ]; then
@@ -304,6 +519,35 @@ install_one() {
             mkdir -p "$DEST"
             TARGET_LINK="$DEST/$LINK_NAME"
 
+            # --- RESOLUCIÓN CANÓNICA ---
+            real_target=$(canonical_path "$TARGET_LINK")
+            link_dir=$(dirname "$TARGET_LINK")
+            real_dir=$(canonical_path "$link_dir")
+
+            # --- VERIFICACIÓN DE DIRECTORIOS PROTEGIDOS ---
+            skip=false
+            for protected in "${PROTECTED_DIRS[@]}"; do
+                real_protected=$(canonical_path "$protected")
+                if [ "$real_dir" = "$real_protected" ] || [[ "$real_dir" == "$real_protected/"* ]]; then
+                    echo -e "${RED}🚫  Error de seguridad: No se permite crear enlaces en '$link_dir' (directorio protegido). Enlace '$LINK_NAME' omitido.${NC}"
+                    skip=true
+                    break
+                fi
+            done
+            $skip && continue
+
+            # --- VERIFICACIÓN DE ARCHIVOS PROTEGIDOS ---
+            for protected in "${PROTECTED_FILES[@]}"; do
+                real_protected=$(canonical_path "$protected")
+                if [ "$real_target" = "$real_protected" ]; then
+                    echo -e "${RED}🚫  Error de seguridad: No se permite sobrescribir el archivo protegido '$protected'. Enlace '$LINK_NAME' omitido.${NC}"
+                    skip=true
+                    break
+                fi
+            done
+            $skip && continue
+
+            # --- Gestión de sobrescritura normal ---
             if [ -e "$TARGET_LINK" ] || [ -L "$TARGET_LINK" ]; then
                 if [ -L "$TARGET_LINK" ] && [ "$(readlink "$TARGET_LINK")" == "$APP_DIR/$FILE" ]; then
                     echo -e "   ${YELLOW}[!] Enlace existente de la misma app: $LINK_NAME → se reemplazará.${NC}"
@@ -362,7 +606,6 @@ fi
 if [ ${#PACKAGES[@]} -eq 1 ] && [ "${PACKAGES[0]}" == "casata" ]; then
     echo -e "${GREEN}Redirigiendo a la actualización de Casata...${NC}"
     exec "$GLOBAL_ROOT/modules/install-casata.sh" "$@"
-    # Si exec falla:
     echo -e "${RED}Error: No se pudo ejecutar el módulo de actualización de Casata.${NC}"
     exit 1
 fi

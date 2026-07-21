@@ -12,6 +12,7 @@ MostrarHelp() {
         echo "Casata Installer Help"
         echo "---------------------"
         echo ""
+        echo "Tienes que ejecutar este script como root (sudo)"
         echo "Los flags son:"
         echo "  --help (-h): muestra esta ayuda."
         echo "  --version (-v): muestra la versión que tienes en el paquete localmente."
