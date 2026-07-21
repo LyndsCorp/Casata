@@ -23,6 +23,7 @@ Que al hacer sudo casata update, al detectar un singrepo que intenta sobreescrib
 Además de eso, ninguna app puede crear symlinks en /usr/local/casata/, /home/, /boot/, /root/, /dev/ y /sys/ ni tampoco sobreescribir binarios críticos del sistema como /usr/bin/casata, /usr/bin/apt, o todos los binarios de utilscore o utils-linux, por motivos de seguridad. En una variable del módulo install.sh se encuentra la lista de carpetas protegidas y en otra variable los archivos protegidos.
 ###
 
+### HECHO
 Para Casata 1.2.2
 En /usr/local/casata/repos/singrepos/PRIORITY se indican los singrepos que pueden mover (con un GUIDE.sh) archivos del sistema. Esto es así para sudo casata install cachyos-kernel y que haga un backup del anterior kernel. 
 Se tiene que hacer con una advertencia:
@@ -35,6 +36,7 @@ cachyos-kernel
 ¿Continuar? (S/n)
 ```
 Y si pone S, ejecuta el GUIDE.sh
+###
 
 Para Casata 1.3
 Las aplicaciones al instalarse pueden instalar dependencias con Pacman, DNF y Casata, además de APT y PIP de antes. Eso es así porque el mismo paquete puede tener diferente nombre en Pacman que en APT por ejemplo.
