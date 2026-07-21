@@ -1,7 +1,7 @@
 
 ¡Bienvenido a Casata: el gestor de aplicaciones de Lynds Corp.!
 
-Está diseñado para poder instalar las aplicaciones de Lynds Corp. ffacilmente sin que estén en los repositorios de Debian Trixie de APT.
+Está diseñado para poder instalar las aplicaciones de Lynds Corp. fácilmente sin que estén en los repositorios de Debian Trixie de APT.
 
 Escribe "casata --help" o "casata --ayuda" para recibir ayuda sobre cómo usarlo.
 
