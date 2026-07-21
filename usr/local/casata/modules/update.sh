@@ -204,8 +204,6 @@ if [ -f "$PRIORITY_FILE" ]; then
             PRIORITY_FILES+=("$METAREPOS_DIR/$line")
         elif [ -f "$METAREPOS_DIR/$line.json" ]; then
             PRIORITY_FILES+=("$METAREPOS_DIR/$line.json")
-        else
-            #echo -e "${YELLOW}⚠ Metarepo listado en PRIORITY no encontrado: $line${NC}"
         fi
     done < "$PRIORITY_FILE"
 fi
