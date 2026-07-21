@@ -44,5 +44,4 @@ pacman
 dnf
 pip
 casata
-No solo dependences, que eso era solo para APT.
 Con Casata, lo que hacen es instalar la dependencia con casata install.

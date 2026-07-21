@@ -2,18 +2,18 @@
 
 # /usr/local/casata/modules/install.sh
 # Copyright (C) 2026, GPL v3+, Lynds Corp., Aros Legendarios, David Baña Szymaniak
-# Script de instalar aplicaciones en Casata 1.2.1
-#
-# NOVEDADES DE SEGURIDAD:
-#   - Impide enlaces en directorios protegidos definidos en PROTECTED_DIRS.
-#   - Bloquea sobrescribir binarios críticos definidos en PROTECTED_FILES.
-#   - Las rutas se resuelven canónicamente (realpath -m) para evitar bypass mediante enlaces simbólicos del sistema (p. ej. /bin -> /usr/bin).
+# Script de instalar aplicaciones en Casata 1.2.2
+
+# NOVEDADES DE COMPATIBILIDAD CON SEGURIDAD (1.2.1 → 1.2.2):
+#   - Soporte para paquetes autorizados a modificar el sistema mediante GUIDE.sh.
+#     Lista blanca en /usr/local/casata/repos/singrepos/PRIORITY.
 
 shopt -s nullglob
 set -euo pipefail
 
 GLOBAL_ROOT="/usr/local/casata"
 DATA_DIR="$GLOBAL_ROOT/data"
+SINGREPOS_PRIORITY="$GLOBAL_ROOT/repos/singrepos/PRIORITY"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -21,8 +21,6 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 APT_UPDATE_STATUS=0
-
-# Variables globales para limpieza
 TEMP_DIR=""
 EXTRACT_DIR=""
 
@@ -243,12 +241,10 @@ canonical_path() {
     if command -v realpath &>/dev/null; then
         realpath -m "$path" 2>/dev/null || echo "$path"
     else
-        # Fallback si realpath no existe (raro, pero por seguridad)
         echo "$path"
     fi
 }
 
-# ------------------------------------------------------------
 cleanup() {
     if [ -n "$TEMP_DIR" ] && [ -d "$TEMP_DIR" ]; then
         rm -rf "$TEMP_DIR"
@@ -261,14 +257,11 @@ trap cleanup EXIT
 
 install_system_deps() {
     local deps="$1"
-
     echo -e "${YELLOW}Intentando instalar dependencias: $deps${NC}"
-
     if ! command -v apt &>/dev/null; then
         echo -e "${RED}Error: APT no está disponible.${NC}"
         return 1
     fi
-
     if [ $APT_UPDATE_STATUS -eq 0 ]; then
         echo -e "${YELLOW}Ejecutando apt update...${NC}"
         if apt update; then
@@ -282,7 +275,6 @@ install_system_deps() {
         echo -e "${RED}No se intenta instalar dependencias porque apt update falló.${NC}"
         return 1
     fi
-
     if apt install -y $deps; then
         return 0
     else
@@ -295,7 +287,6 @@ install_pip_deps() {
     local pkgs="$1"
     local venv_path="/usr/local/casata/python-venv"
     local lock_file="$venv_path/.install.lock"
-
     if ! ls "$venv_path/bin/python" >/dev/null 2>&1; then
         echo -e "${YELLOW}Creando entorno virtual compartido en $venv_path...${NC}"
         if command -v python3 &>/dev/null; then
@@ -305,18 +296,14 @@ install_pip_deps() {
             return 1
         fi
     fi
-
     touch "$lock_file" 2>/dev/null || { echo -e "${RED}Error: No se puede crear lock file en $lock_file.${NC}"; return 1; }
-
     local pip_pkgs=()
     while IFS= read -r pkg; do
         [[ -n "$pkg" ]] && pip_pkgs+=("$pkg")
     done <<< "$pkgs"
-
     if [ ${#pip_pkgs[@]} -eq 0 ]; then
         return 0
     fi
-
     echo -e "${YELLOW}Instalando dependencias Python: ${pip_pkgs[*]}${NC}"
     flock --exclusive "$lock_file" "$venv_path/bin/pip" install "${pip_pkgs[@]}" || {
         echo -e "${RED}Error al instalar dependencias pip.${NC}"
@@ -335,11 +322,9 @@ force_remove() {
             LINK_NAME=$(echo "$item" | jq -r '.name')
             FILE=$(echo "$item" | jq -r '.file')
             [ "$DEST" == "null" ] || [ "$LINK_NAME" == "null" ] || [ "$FILE" == "null" ] && continue
-
             DEST="${DEST/#\~/$HOME}"
             DEST="${DEST//\$HOME/$HOME}"
             TARGET_LINK="$DEST/$LINK_NAME"
-
             if [ -L "$TARGET_LINK" ] && [ "$(readlink "$TARGET_LINK")" == "$app_dir/$FILE" ]; then
                 rm -f "$TARGET_LINK"
                 echo -e "   [-] Enlace eliminado: $LINK_NAME"
@@ -353,13 +338,11 @@ ask_overwrite() {
     local target="$1"
     local app_name="$2"
     local auto_yes="$3"
-
     if [ "$auto_yes" -eq 1 ]; then
         echo -e "${YELLOW}Usando -y: Sobrescribiendo '$target' automáticamente.${NC}"
         rm -rf "$target"
         return 0
     fi
-
     echo -e "${YELLOW}Advertencia: '$target' ya existe y no es un enlace a $app_name.${NC}"
     read -p "¿Sobrescribirlo? (perderás el archivo original) [s/N/a (abortar)]: " resp < /dev/tty
     if [[ "$resp" =~ ^[sSyY] ]]; then
@@ -375,7 +358,6 @@ ask_overwrite() {
     fi
 }
 
-# Función para instalar un solo paquete (siempre global)
 install_one() {
     local PKG_NAME="$1"
     local AUTO_YES="$2"
@@ -571,6 +553,42 @@ install_one() {
         echo -e "${YELLOW}Aviso: No se encontró $GUIDE_TARGET. No se crearon enlaces.${NC}"
     fi
 
+    # ------------------------------------------------------------
+    # NUEVO (Casata 1.2.2): Ejecución de GUIDE.sh para paquetes autorizados
+    # ------------------------------------------------------------
+    if [ -f "$SINGREPOS_PRIORITY" ]; then
+        if grep -qxF "$PKG_NAME" "$SINGREPOS_PRIORITY" 2>/dev/null; then
+            echo -e "\n${YELLOW}Este paquete puede modificar archivos del sistema.${NC}"
+            echo -e "\nRepositorio autorizado:"
+            echo -e "  ${GREEN}$PKG_NAME${NC}"
+            echo ""
+            if [ $AUTO_YES -eq 1 ]; then
+                echo -e "${YELLOW}Usando -y: se ejecutará GUIDE.sh automáticamente.${NC}"
+            else
+                read -p "¿Continuar? (S/n): " resp < /dev/tty
+                if [[ ! "$resp" =~ ^[SsYy]?$ ]]; then
+                    echo -e "${YELLOW}Modificaciones del sistema omitidas. Puede ejecutar manualmente GUIDE.sh desde $APP_DIR.${NC}"
+                    echo -e "${GREEN}¡$PKG_NAME instalado correctamente! (versión $REPO_VERSION)${NC}"
+                    return 0
+                fi
+            fi
+
+            GUIDE_SCRIPT="$APP_DIR/GUIDE.sh"
+            if [ -f "$GUIDE_SCRIPT" ]; then
+                echo -e "${YELLOW}Ejecutando GUIDE.sh...${NC}"
+                if bash "$GUIDE_SCRIPT"; then
+                    echo -e "${GREEN}✓ GUIDE.sh ejecutado correctamente.${NC}"
+                else
+                    echo -e "${RED}Error al ejecutar GUIDE.sh. La instalación puede estar incompleta.${NC}"
+                    return 1
+                fi
+            else
+                echo -e "${RED}Error: No se encontró GUIDE.sh en el paquete.${NC}"
+                return 1
+            fi
+        fi
+    fi
+
     echo -e "${GREEN}¡$PKG_NAME instalado correctamente! (versión $REPO_VERSION)${NC}"
     return 0
 }
@@ -602,7 +620,6 @@ if [ ${#PACKAGES[@]} -eq 0 ]; then
     exit 1
 fi
 
-# --- ROUTER: si el único paquete es "casata", delegamos en el nuevo módulo ---
 if [ ${#PACKAGES[@]} -eq 1 ] && [ "${PACKAGES[0]}" == "casata" ]; then
     echo -e "${GREEN}Redirigiendo a la actualización de Casata...${NC}"
     exec "$GLOBAL_ROOT/modules/install-casata.sh" "$@"
@@ -610,7 +627,6 @@ if [ ${#PACKAGES[@]} -eq 1 ] && [ "${PACKAGES[0]}" == "casata" ]; then
     exit 1
 fi
 
-# --- Instalación normal de aplicaciones ---
 FAILED=()
 for PKG in "${PACKAGES[@]}"; do
     echo -e "\n${GREEN}========================================${NC}"
