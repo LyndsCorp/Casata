@@ -77,6 +77,7 @@ case "$COMMAND" in
     listar|list) COMMAND="list" ;;
     informacion|info) COMMAND="info" ;;
     historial|history) COMMAND="history" ;;
+    clean|limpiar) COMMNAD="clean" ;;
     --version|-v) COMMAND="--version" ;;
     --help|--h|-h|ayuda|--ayuda|help|--help|-ayuda) COMMAND="--help" ;;
 esac
@@ -98,6 +99,12 @@ case "$COMMAND" in
         run_module "history.sh" "$@"
         ;;
 
+    clean)
+        require_root
+        log_command "$FULL_COMMAND"
+        run_module "clean.sh" "$@"
+        ;;
+
     search)
         [ -z "$1" ] && { echo -e "${RED}Error: Falta texto de búsqueda.${NC}"; exit 1; }
         log_command "$FULL_COMMAND"
@@ -111,14 +118,14 @@ case "$COMMAND" in
         ;;
 
     install)
-        require_root 
+        require_root
         [ -z "$1" ] && { echo -e "${RED}Error: Faltan argumentos.${NC}"; exit 1; }
         log_command "$FULL_COMMAND"
         run_module "install.sh" "$@"
         ;;
 
     remove)
-        require_root 
+        require_root
         [ -z "$1" ] && { echo -e "${RED}Error: Faltan argumentos.${NC}"; exit 1; }
         log_command "$FULL_COMMAND"
         run_module "remove.sh" "$@"
