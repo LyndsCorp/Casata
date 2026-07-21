@@ -1,11 +1,12 @@
 # Metarepos forge de Casata
-## Mantenidos por la comunidad.
+## Mantenidos por desarrolladores verificados
 
-Trae apps creadas por la comunidad, pero supervisadas por Lynds Corp.
+Trae apps creadas por desarrolladores verificados y supervisadas por Lynds Corp.
 
 ``` Bash
 sudo casata add forge
 ```
 
-Colaboradores:
-Nadie :c
+## Colaboradores:
+David Baña Szymaniak
+ - Zen
