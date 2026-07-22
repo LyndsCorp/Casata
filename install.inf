@@ -7,6 +7,7 @@
 Full = false
 NoInstalar = false
 YaMostrasteHelp = false
+UseCustomPath = false
 
 function MostrarHelp()
     if YaMostrasteHelp == false then
@@ -38,9 +39,14 @@ flags (0, # aqui se definen los flags
         NoInstalar = true
     }
 
+    #flags de uso
     --full|-f{
         echo "FLAG: Instalando versión completa con internet. Local como fallback."
         Full = true
+    }
+    --path=string path{
+         CustomPath = $path
+         UseCustomPath = true
     }
 
     #flags de licencia
@@ -62,13 +68,40 @@ if user != "root" then
     exit(1)
 fi
 
+if UseCustomPath == true then
+    NoInstalar = true
+
+    echo "Dándole permisos de ejecución a usr/bin/casata para que reconozca el comando y a los módulos..."
+    chmod +x usr/bin/casata
+    chmod +x ./usr/local/casata/modules/*
+
+    echo "Copiando el router (casata.sh) al usr/bin/casata del Path personalizado para que sea un comando en la terminal..."
+    cp usr/bin/casata "$CustomPath/usr/bin/casata"
+
+    #copiar el root de Casata
+    echo "Copiando root de Casata en /usr/local/casata/..."
+    cp -r usr/local/casata/ "$CustomPath/usr/local/"
+    
+    echo ""
+    success("----------------------------------------------------------------------------------")
+    success("¡Casata instalado correctamente!")
+    warn("Versión:")
+    cat /usr/local/casata/VERSION
+
+    echo ""
+    echo "Te recomiendo ejecutar `sudo casata add oficial forge community others` para añadir los repositorios principales."
+    echo "¡Prueba a escribir `casata` en tu terminal!"
+
+    exit(0)
+fi
+
 if NoInstalar == false then
     #copiar el script para que sea un comando
     echo "Copiando el router (casata.sh) al /usr/bin/casata para que sea un comando en la terminal..."
     cp usr/bin/casata /usr/bin/casata
 
     echo "Dándole permisos de ejecución a /usr/bin/casata para que reconozca el comando..."
-    chmod +x /usr/bin/casata
+    chmod +x ./usr/bin/casata
 
     #copiar el root de Casata
     echo "Copiando root de Casata en /usr/local/casata/..."
