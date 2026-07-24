@@ -4,13 +4,10 @@
 shopt -s nullglob
 set -euo pipefail
 
-TYPE="${1:-}"
-URL="${2:-}"
-
 CASATA_ROOT="/usr/local/casata"
 METAREPOS_DIR="$CASATA_ROOT/repos/metarepos"
 SINGREPOS_DIR="$CASATA_ROOT/repos/singrepos"
-DATA_DIR="$CASATA_ROOT/data"
+DATA_DIR="$CASATA_ROOT/repos/data"
 OFICIAL_FILE="$CASATA_ROOT/repos/OFICIAL"
 COMMUNITY_FILE="$CASATA_ROOT/repos/COMMUNITY"
 FORGE_FILE="$CASATA_ROOT/repos/FORGE"
@@ -88,7 +85,6 @@ process_metarepo() {
     done
 }
 
-# Función unificada para procesar listas maestras (comunity, forge, others)
 process_master_list() {
     local file="$1"
     local label="$2"
@@ -119,40 +115,64 @@ process_master_list() {
     echo -e "\n${GREEN}Completado. Procesados: $REPO_COUNT, Errores: $ERRORS${NC}"
 }
 
-# Normalización de alias
-case "$TYPE" in
-    comunity|community|comunidad|comunitario) TYPE="community" ;;
-    forge|forja|forjado)                   TYPE="forge" ;;
-    others|other|otro|otros)       TYPE="others" ;;
-esac
+# Si no hay argumentos, mostrar ayuda y salir
+if [ $# -eq 0 ]; then
+    echo -e "${RED}Uso: casata add <tipo1> [url1] <tipo2> [url2] ...${NC}"
+    echo -e "  Tipos sin URL: oficial, community, forge, others"
+    echo -e "  Tipos con URL:  singrepo <URL>, repo <URL>"
+    exit 1
+fi
 
-case "$TYPE" in
-    singrepo)
-        [ -z "$URL" ] && { echo -e "${RED}Falta URL${NC}"; exit 1; }
-        process_singrepo "$URL"
-        ;;
-    repo)
-        [ -z "$URL" ] && { echo -e "${RED}Falta URL${NC}"; exit 1; }
-        process_metarepo "$URL"
-        ;;
-    oficial)
-        if [ ! -f "$OFICIAL_FILE" ]; then
-            echo -e "${RED}Falta $OFICIAL_FILE${NC}"
-            exit 1
-        fi
-        process_master_list "$OFICIAL_FILE" "oficial"
-        ;;
-    community)
-        process_master_list "$COMMUNITY_FILE" "community"
-        ;;
-    forge)
-        process_master_list "$FORGE_FILE" "forge"
-        ;;
-    others)
-        process_master_list "$OTHERS_FILE" "others"
-        ;;
-    *)
-        echo -e "${RED}Uso: casata add <singrepo|repo|oficial|community|forge|others> [URL]${NC}"
-        exit 1
-        ;;
-esac
+GLOBAL_ERROR=0
+while [ $# -gt 0 ]; do
+    raw_type="$1"
+    shift
+
+    # Normalización de alias
+    case "$raw_type" in
+        comunity|community|comunidad|comunitario) type="community" ;;
+        forge|forja|forjado)                   type="forge" ;;
+        others|other|otro|otros)       type="others" ;;
+        oficial)                        type="oficial" ;;
+        singrepo)                       type="singrepo" ;;
+        repo)                           type="repo" ;;
+        *)
+            echo -e "${RED}Tipo desconocido: $raw_type${NC}"
+            GLOBAL_ERROR=1
+            continue
+            ;;
+    esac
+
+    # Los tipos sin URL simplemente se procesan
+    case "$type" in
+        oficial)
+            process_master_list "$OFICIAL_FILE" "oficial" || GLOBAL_ERROR=1
+            ;;
+        community)
+            process_master_list "$COMMUNITY_FILE" "community" || GLOBAL_ERROR=1
+            ;;
+        forge)
+            process_master_list "$FORGE_FILE" "forge" || GLOBAL_ERROR=1
+            ;;
+        others)
+            process_master_list "$OTHERS_FILE" "others" || GLOBAL_ERROR=1
+            ;;
+        singrepo|repo)
+            # Necesitan URL como siguiente argumento
+            if [ $# -eq 0 ]; then
+                echo -e "${RED}Falta URL para $type${NC}"
+                GLOBAL_ERROR=1
+                continue
+            fi
+            url="$1"
+            shift
+            if [ "$type" = "singrepo" ]; then
+                process_singrepo "$url" || GLOBAL_ERROR=1
+            else
+                process_metarepo "$url" || GLOBAL_ERROR=1
+            fi
+            ;;
+    esac
+done
+
+exit $GLOBAL_ERROR
