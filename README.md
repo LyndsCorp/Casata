@@ -9,4 +9,7 @@ sudo casata add forge
 
 ## Colaboradores:
 David Baña Szymaniak
- - Zen
+ - Zen-Browser
+ - Gati-Clicker
+Nita
+ - Gati-Clicker
