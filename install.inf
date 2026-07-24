@@ -71,26 +71,30 @@ fi
 if UseCustomPath == true then
     NoInstalar = true
 
+    mkdir -p $CustomPath
+
     echo "Dándole permisos de ejecución a usr/bin/casata para que reconozca el comando y a los módulos..."
     chmod +x usr/bin/casata
     chmod +x ./usr/local/casata/modules/*
 
     echo "Copiando el router (casata.sh) al usr/bin/casata del Path personalizado para que sea un comando en la terminal..."
+    mkdir -p "$CustomPath/usr/bin"
     cp usr/bin/casata "$CustomPath/usr/bin/casata"
 
     #copiar el root de Casata
-    echo "Copiando root de Casata en /usr/local/casata/..."
+    echo "Copiando root de Casata en /usr/local/casata/ del path elegido..."
+    mkdir -p "$CustomPath/usr/local"
     cp -r usr/local/casata/ "$CustomPath/usr/local/"
     
     echo ""
     success("----------------------------------------------------------------------------------")
     success("¡Casata instalado correctamente!")
     warn("Versión:")
-    cat /usr/local/casata/VERSION
+    cat "$CustomPath/usr/local/casata/VERSION"
 
     echo ""
-    echo "Te recomiendo ejecutar `sudo casata add oficial forge community others` para añadir los repositorios principales."
-    echo "¡Prueba a escribir `casata` en tu terminal!"
+    print("Te recomiendo ejecutar `sudo casata add oficial forge community others` para añadir los repositorios principales.")
+    print("¡Prueba a escribir `casata` en tu terminal!")
 
     exit(0)
 fi
@@ -110,8 +114,6 @@ if NoInstalar == false then
     echo "Dando permisos de ejecución a los módulos de Casata por si acaso..."
     chmod +x /usr/local/casata/modules/*
 
-    echo ""
-
     if Full == true then
         echo "Actualizando Casata si se puede..."
         casata install casata -y && casata add oficial forge community others || echo "No se pudo actualizar. Revisa tu conexión a internet o firewall a github.com."
@@ -125,8 +127,8 @@ if NoInstalar == false then
 
     if Full == false then
         echo ""
-        echo "Te recomiendo ejecutar `sudo casata add oficial forge community others` para añadir los repositorios principales."
-        echo "¡Prueba a escribir `casata` en tu terminal!"
+        print("Te recomiendo ejecutar `sudo casata add oficial forge community others` para añadir los repositorios principales.")
+        print("¡Prueba a escribir `casata` en tu terminal!")
     fi
 
     exit(0) #todo salio bien :)
