@@ -7,7 +7,7 @@ set -euo pipefail
 CASATA_ROOT="/usr/local/casata"
 METAREPOS_DIR="$CASATA_ROOT/repos/metarepos"
 SINGREPOS_DIR="$CASATA_ROOT/repos/singrepos"
-DATA_DIR="$CASATA_ROOT/repos/data"
+DATA_DIR="$CASATA_ROOT/data"
 OFICIAL_FILE="$CASATA_ROOT/repos/OFICIAL"
 COMMUNITY_FILE="$CASATA_ROOT/repos/COMMUNITY"
 FORGE_FILE="$CASATA_ROOT/repos/FORGE"
