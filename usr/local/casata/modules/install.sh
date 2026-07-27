@@ -275,7 +275,7 @@ install_system_deps() {
         echo -e "${RED}No se intenta instalar dependencias porque apt update falló.${NC}"
         return 1
     fi
-    if apt install -y $deps; then
+    if apt install $deps; then
         return 0
     else
         echo -e "${RED}ERROR DE CLIENTE: No se pudieron instalar las dependencias automáticamente con APT. Por favor, instálalas manualmente: $deps${NC}"
