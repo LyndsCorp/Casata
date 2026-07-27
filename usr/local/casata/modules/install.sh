@@ -424,8 +424,20 @@ install_one() {
                     NEED_UPDATE=2
                 fi
             else
-                echo -e "${GREEN}La versión instalada es más reciente que la del repositorio. No se hará nada.${NC}"
-                return 0
+                # La versión instalada es más reciente que la del repositorio
+                echo -e "${YELLOW}La versión instalada ($INSTALLED_VERSION) es más reciente que la del repositorio ($REPO_VERSION). Es posible que sea un error del servidor o que hayas modificado un archivo manualmente.${NC}"
+                if [ $AUTO_YES -eq 0 ]; then
+                    read -p "¿Quieres actualizar (downgrade) a la versión del repositorio? [s/N] " resp < /dev/tty
+                    if [[ "$resp" =~ ^[sSyY] ]]; then
+                        NEED_UPDATE=2
+                    else
+                        echo -e "${YELLOW}No se hará nada.${NC}"
+                        return 0
+                    fi
+                else
+                    echo -e "${YELLOW}Usando -y: se actualizará (downgrade) automáticamente.${NC}"
+                    NEED_UPDATE=2
+                fi
             fi
         else
             echo -e "${YELLOW}Paquete instalado pero sin archivo VERSION. Se reinstalará.${NC}"
