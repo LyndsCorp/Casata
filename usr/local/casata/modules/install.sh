@@ -291,7 +291,7 @@ init_package_manager() {
         saved=$(cat "$OS_PACKAGES_FILE" | tr -d '[:space:]')
         if [[ "$saved" == "apt" || "$saved" == "pacman" || "$saved" == "dnf" ]]; then
             PKG_MANAGER="$saved"
-            echo -e "${GREEN}Usando gestor indicado en OS_PACKAGES: $PKG_MANAGER${NC}"
+            echo -e "${GREEN}Usando gestor de paquetes de tu sistema operativo: $PKG_MANAGER${NC}"
             if ! command -v "$PKG_MANAGER" &>/dev/null; then
                 echo -e "${YELLOW}El gestor '$PKG_MANAGER' no está presente. Redetectando...${NC}"
                 local detected

@@ -26,7 +26,7 @@ show_app_info() {
     # Tamaño
     if [ -d "$app_dir" ]; then
         size=$(du -sh "$app_dir" 2>/dev/null | cut -f1)
-        echo -e "  ${YELLOW}Tamaño:${NC} $size"
+        echo -e "  ${YELLOW}Tamaño en disco:${NC} $size"
     fi
 
     # Versión
