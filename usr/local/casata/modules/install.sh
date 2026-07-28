@@ -2,11 +2,7 @@
 
 # /usr/local/casata/modules/install.sh
 # Copyright (C) 2026, GPL v3+, Lynds Corp., Aros Legendarios, David Baña Szymaniak
-# Script de instalar aplicaciones en Casata 1.2.2
-
-# NOVEDADES DE COMPATIBILIDAD CON SEGURIDAD (1.2.1 → 1.2.2):
-#   - Soporte para paquetes autorizados a modificar el sistema mediante GUIDE.sh.
-#     Lista blanca en /usr/local/casata/repos/singrepos/PRIORITY.
+# Script de instalar aplicaciones en Casata 1.3.0
 
 shopt -s nullglob
 set -euo pipefail
@@ -14,15 +10,19 @@ set -euo pipefail
 GLOBAL_ROOT="/usr/local/casata"
 DATA_DIR="$GLOBAL_ROOT/data"
 SINGREPOS_PRIORITY="$GLOBAL_ROOT/repos/singrepos/PRIORITY"
+OS_PACKAGES_FILE="$GLOBAL_ROOT/OS_PACKAGES"
+CASATA_DEP_CACHE="/tmp/casata-deps-$$"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-APT_UPDATE_STATUS=0
-TEMP_DIR=""
-EXTRACT_DIR=""
+# ------------------------------------------------------------
+# Estado del gestor de paquetes
+# ------------------------------------------------------------
+PKG_MANAGER=""            # apt, pacman o dnf
+PM_UPDATE_DONE=0          # 0=no hecho, 1=hecho OK, 2=falló
 
 # ------------------------------------------------------------
 # Directorios protegidos donde NUNCA se puede crear un enlace
@@ -231,6 +231,14 @@ PROTECTED_FILES=(
     "/usr/bin/wipefs"
     "/usr/bin/write"
     "/usr/bin/zramctl"
+
+    # --- Binarios en /usr/local/bin (evitar secuestro) ---
+    "/usr/local/bin/casata"
+    "/usr/local/bin/sudo"
+    "/usr/local/bin/bash"
+    "/usr/local/bin/python3"
+    "/usr/local/bin/python"
+    "/usr/local/bin/perl"
 )
 
 # ------------------------------------------------------------
@@ -246,74 +254,224 @@ canonical_path() {
 }
 
 cleanup() {
-    if [ -n "$TEMP_DIR" ] && [ -d "$TEMP_DIR" ]; then
+    if [ -n "${TEMP_DIR:-}" ] && [ -d "$TEMP_DIR" ]; then
         rm -rf "$TEMP_DIR"
     fi
-    if [ -n "$EXTRACT_DIR" ] && [ -d "$EXTRACT_DIR" ]; then
+    if [ -n "${EXTRACT_DIR:-}" ] && [ -d "$EXTRACT_DIR" ]; then
         rm -rf "$EXTRACT_DIR"
     fi
+    rm -f "$CASATA_DEP_CACHE"
 }
 trap cleanup EXIT
 
-install_system_deps() {
-    local deps="$1"
-    echo -e "${YELLOW}Intentando instalar dependencias: $deps${NC}"
-    if ! command -v apt &>/dev/null; then
-        echo -e "${RED}Error: APT no está disponible.${NC}"
-        return 1
-    fi
-    if [ $APT_UPDATE_STATUS -eq 0 ]; then
-        echo -e "${YELLOW}Ejecutando apt update...${NC}"
-        if apt update; then
-            APT_UPDATE_STATUS=1
-        else
-            APT_UPDATE_STATUS=2
-            echo -e "${RED}ERROR DEL CLIENTE: apt update falló. No se instalarán dependencias del sistema.${NC}"
-            return 1
-        fi
-    elif [ $APT_UPDATE_STATUS -eq 2 ]; then
-        echo -e "${RED}No se intenta instalar dependencias porque apt update falló.${NC}"
-        return 1
-    fi
-    # --- MODIFICACIÓN: usar -y si el flag global AUTO_YES está activo ---
-    if [ "${AUTO_YES:-0}" -eq 1 ]; then
-        if apt install -y $deps; then
-            return 0
-        else
-            echo -e "${RED}ERROR DE CLIENTE: No se pudieron instalar las dependencias automáticamente con APT. Por favor, instálalas manualmente: $deps${NC}"
-            return 1
-        fi
+# ------------------------------------------------------------
+# Detección del gestor de paquetes
+# ------------------------------------------------------------
+detect_package_manager() {
+    if command -v apt &>/dev/null; then
+        echo "apt"
+    elif command -v pacman &>/dev/null; then
+        echo "pacman"
+    elif command -v dnf &>/dev/null; then
+        echo "dnf"
     else
-        if apt install $deps; then
-            return 0
-        else
-            echo -e "${RED}ERROR DE CLIENTE: No se pudieron instalar las dependencias automáticamente con APT. Por favor, instálalas manualmente: $deps${NC}"
-            return 1
-        fi
+        echo ""
     fi
 }
 
+save_os_packages() {
+    local manager="$1"
+    echo "$manager" > "$OS_PACKAGES_FILE"
+    echo -e "${YELLOW}OS_PACKAGES actualizado con: $manager${NC}"
+}
+
+init_package_manager() {
+    if [ -f "$OS_PACKAGES_FILE" ]; then
+        local saved
+        saved=$(cat "$OS_PACKAGES_FILE" | tr -d '[:space:]')
+        if [[ "$saved" == "apt" || "$saved" == "pacman" || "$saved" == "dnf" ]]; then
+            PKG_MANAGER="$saved"
+            echo -e "${GREEN}Usando gestor indicado en OS_PACKAGES: $PKG_MANAGER${NC}"
+            if ! command -v "$PKG_MANAGER" &>/dev/null; then
+                echo -e "${YELLOW}El gestor '$PKG_MANAGER' no está presente. Redetectando...${NC}"
+                local detected
+                detected=$(detect_package_manager)
+                if [ -z "$detected" ]; then
+                    echo -e "${RED}No se encontró ningún gestor de paquetes compatible (apt, pacman, dnf).${NC}"
+                    exit 1
+                fi
+                PKG_MANAGER="$detected"
+                save_os_packages "$PKG_MANAGER"
+            fi
+            return
+        fi
+    fi
+
+    local detected
+    detected=$(detect_package_manager)
+    if [ -z "$detected" ]; then
+        echo -e "${RED}No se encontró ningún gestor de paquetes compatible (apt, pacman, dnf).${NC}"
+        exit 1
+    fi
+    PKG_MANAGER="$detected"
+    save_os_packages "$PKG_MANAGER"
+}
+
+# ------------------------------------------------------------
+# Instalación de dependencias del sistema (adaptada a cada gestor)
+# ------------------------------------------------------------
+install_system_deps() {
+    local deps="$1"
+    [ -z "$deps" ] && return 0
+
+    echo -e "${YELLOW}Intentando instalar dependencias del sistema ($PKG_MANAGER): $deps${NC}"
+
+    _try_install() {
+        case "$PKG_MANAGER" in
+            apt)
+                if [ $PM_UPDATE_DONE -eq 0 ]; then
+                    echo -e "${YELLOW}Ejecutando apt update...${NC}"
+                    if apt update; then
+                        PM_UPDATE_DONE=1
+                    else
+                        PM_UPDATE_DONE=2
+                        echo -e "${RED}ERROR: apt update falló.${NC}"
+                        return 1
+                    fi
+                elif [ $PM_UPDATE_DONE -eq 2 ]; then
+                    echo -e "${RED}No se intenta instalar porque apt update falló previamente.${NC}"
+                    return 1
+                fi
+
+                if [ "${AUTO_YES:-0}" -eq 1 ]; then
+                    apt install -y $deps
+                else
+                    apt install $deps
+                fi
+                ;;
+            pacman)
+                # Intento inicial sin sincronizar bases
+                if [ "${AUTO_YES:-0}" -eq 1 ]; then
+                    pacman -S --needed --noconfirm $deps && return 0
+                else
+                    pacman -S --needed $deps && return 0
+                fi
+
+                # Fallo: pedir sincronización de bases
+                echo -e "${YELLOW}No se encontraron los paquetes. Puede ser necesario sincronizar las bases de datos.${NC}"
+                if [ "${AUTO_YES:-0}" -eq 1 ]; then
+                    echo -e "${YELLOW}(AUTO_YES) Sincronizando bases con pacman -Sy... (¡cuidado con actualizaciones parciales!)${NC}"
+                    if pacman -Sy --noconfirm; then
+                        PM_UPDATE_DONE=1
+                        pacman -S --needed --noconfirm $deps
+                    else
+                        PM_UPDATE_DONE=2
+                        echo -e "${RED}ERROR: pacman -Sy falló.${NC}"
+                        return 1
+                    fi
+                else
+                    echo -e "${YELLOW}Se recomienda ejecutar 'pacman -Sy' manualmente y luego reintentar.${NC}"
+                    read -p "¿Sincronizar bases ahora y continuar? (puede causar actualizaciones parciales) [s/N]: " resp < /dev/tty
+                    if [[ "$resp" =~ ^[sSyY] ]]; then
+                        if pacman -Sy --noconfirm; then
+                            PM_UPDATE_DONE=1
+                            pacman -S --needed $deps
+                        else
+                            PM_UPDATE_DONE=2
+                            echo -e "${RED}ERROR: pacman -Sy falló.${NC}"
+                            return 1
+                        fi
+                    else
+                        echo -e "${YELLOW}Omitiendo dependencias del sistema.${NC}"
+                        return 1
+                    fi
+                fi
+                ;;
+            dnf)
+                if [ $PM_UPDATE_DONE -eq 0 ]; then
+                    echo -e "${YELLOW}Ejecutando dnf makecache...${NC}"
+                    if dnf makecache; then
+                        PM_UPDATE_DONE=1
+                    else
+                        PM_UPDATE_DONE=2
+                        echo -e "${RED}ERROR: dnf makecache falló.${NC}"
+                        return 1
+                    fi
+                elif [ $PM_UPDATE_DONE -eq 2 ]; then
+                    echo -e "${RED}No se intenta instalar porque dnf makecache falló.${NC}"
+                    return 1
+                fi
+
+                if [ "${AUTO_YES:-0}" -eq 1 ]; then
+                    dnf install -y $deps
+                else
+                    dnf install $deps
+                fi
+                ;;
+            *)
+                echo -e "${RED}Gestor de paquetes no soportado: $PKG_MANAGER${NC}"
+                return 1
+                ;;
+        esac
+    }
+
+    if _try_install; then
+        return 0
+    fi
+
+    # Fallback si el binario del gestor no existe
+    if ! command -v "$PKG_MANAGER" &>/dev/null; then
+        echo -e "${YELLOW}El gestor '$PKG_MANAGER' parece no estar disponible. Redetectando...${NC}"
+        local detected
+        detected=$(detect_package_manager)
+        if [ -z "$detected" ]; then
+            echo -e "${RED}No se encontró ningún gestor de paquetes compatible.${NC}"
+            return 1
+        fi
+        PKG_MANAGER="$detected"
+        save_os_packages "$PKG_MANAGER"
+        PM_UPDATE_DONE=0
+        echo -e "${YELLOW}Reintentando con el gestor $PKG_MANAGER...${NC}"
+        _try_install || {
+            echo -e "${RED}Error al instalar dependencias con el nuevo gestor.${NC}"
+            return 1
+        }
+        return 0
+    else
+        echo -e "${RED}Error al instalar dependencias con $PKG_MANAGER.${NC}"
+        return 1
+    fi
+}
+
+# ------------------------------------------------------------
+# Instalación de dependencias pip
+# ------------------------------------------------------------
 install_pip_deps() {
     local pkgs="$1"
     local venv_path="/usr/local/casata/python-venv"
     local lock_file="$venv_path/.install.lock"
+
+    [ -z "$pkgs" ] && return 0
+
     if ! ls "$venv_path/bin/python" >/dev/null 2>&1; then
         echo -e "${YELLOW}Creando entorno virtual compartido en $venv_path...${NC}"
         if command -v python3 &>/dev/null; then
             python3 -m venv "$venv_path" || { echo -e "${RED}Error al crear venv.${NC}"; return 1; }
         else
-            echo -e "${RED}Error: python3 no encontrado. No se pueden instalar dependencias pip.${NC}"
+            echo -e "${RED}Error: python3 no encontrado.${NC}"
             return 1
         fi
     fi
-    touch "$lock_file" 2>/dev/null || { echo -e "${RED}Error: No se puede crear lock file en $lock_file.${NC}"; return 1; }
+
+    touch "$lock_file" 2>/dev/null || { echo -e "${RED}Error: No se puede crear lock file.${NC}"; return 1; }
+
     local pip_pkgs=()
     while IFS= read -r pkg; do
         [[ -n "$pkg" ]] && pip_pkgs+=("$pkg")
     done <<< "$pkgs"
-    if [ ${#pip_pkgs[@]} -eq 0 ]; then
-        return 0
-    fi
+
+    [ ${#pip_pkgs[@]} -eq 0 ] && return 0
+
     echo -e "${YELLOW}Instalando dependencias Python: ${pip_pkgs[*]}${NC}"
     flock --exclusive "$lock_file" "$venv_path/bin/pip" install "${pip_pkgs[@]}" || {
         echo -e "${RED}Error al instalar dependencias pip.${NC}"
@@ -322,6 +480,51 @@ install_pip_deps() {
     return 0
 }
 
+# ------------------------------------------------------------
+# Instalación de dependencias Casata (con caché de dependencias)
+# ------------------------------------------------------------
+install_casata_deps() {
+    local casata_pkgs="$1"
+    local auto_yes="${2:-0}"            # heredado de install_one
+
+    [ -z "$casata_pkgs" ] && return 0
+
+    # Inicializar caché si no existe
+    if [ ! -f "$CASATA_DEP_CACHE" ]; then
+        touch "$CASATA_DEP_CACHE"
+    fi
+
+    echo -e "${YELLOW}Instalando dependencias Casata: $casata_pkgs${NC}"
+
+    while IFS= read -r pkg; do
+        [[ -z "$pkg" ]] && continue
+
+        # Si ya fue procesado en esta resolución, salta
+        if grep -qxF "$pkg" "$CASATA_DEP_CACHE"; then
+            echo -e "${YELLOW}→ Dependencia Casata '$pkg' ya fue procesada, omitiendo.${NC}"
+            continue
+        fi
+
+        echo "$pkg" >> "$CASATA_DEP_CACHE"
+
+        echo -e "${YELLOW}→ Instalando dependencia Casata: $pkg${NC}"
+
+        if [ "$auto_yes" -eq 1 ]; then
+            "$GLOBAL_ROOT/modules/install.sh" -y "$pkg"
+        else
+            "$GLOBAL_ROOT/modules/install.sh" "$pkg"
+        fi || {
+            echo -e "${RED}Error al instalar la dependencia Casata '$pkg'.${NC}"
+            return 1
+        }
+    done <<< "$casata_pkgs"
+
+    return 0
+}
+
+# ------------------------------------------------------------
+# Eliminación forzada y reversión de enlaces
+# ------------------------------------------------------------
 force_remove() {
     local app_dir="$1"
     local guide_target="$2"
@@ -368,6 +571,9 @@ ask_overwrite() {
     fi
 }
 
+# ------------------------------------------------------------
+# Función principal de instalación
+# ------------------------------------------------------------
 install_one() {
     local PKG_NAME="$1"
     local AUTO_YES="$2"
@@ -399,8 +605,13 @@ install_one() {
     fi
 
     REPO_VERSION=$(jq -r '.version // "0.0.0"' "$PKG_FILE")
-    APT_DEPS=$(jq -r '.apt[]? // empty' "$PKG_FILE")
-    PIP_DEPS=$(jq -r '.pip[]? // empty' "$PKG_FILE")
+
+    # Leer dependencias con tolerancia a string único
+    APT_DEPS=$(jq -r '.apt? // [] | .[]' "$PKG_FILE")
+    PACMAN_DEPS=$(jq -r '.pacman? // [] | .[]' "$PKG_FILE")
+    DNF_DEPS=$(jq -r '.dnf? // [] | .[]' "$PKG_FILE")
+    PIP_DEPS=$(jq -r '.pip? // [] | .[]' "$PKG_FILE")
+    CASATA_DEPS=$(jq -r '.casata? // [] | .[]' "$PKG_FILE")
 
     INSTALLED_VERSION=""
     NEED_UPDATE=0
@@ -424,8 +635,7 @@ install_one() {
                     NEED_UPDATE=2
                 fi
             else
-                # La versión instalada es más reciente que la del repositorio
-                echo -e "${YELLOW}La versión instalada ($INSTALLED_VERSION) es más reciente que la del repositorio ($REPO_VERSION). Es posible que sea un error del servidor o que hayas modificado un archivo manualmente.${NC}"
+                echo -e "${YELLOW}La versión instalada ($INSTALLED_VERSION) es más reciente que la del repositorio ($REPO_VERSION).${NC}"
                 if [ $AUTO_YES -eq 0 ]; then
                     read -p "¿Quieres actualizar (downgrade) a la versión del repositorio? [s/N] " resp < /dev/tty
                     if [[ "$resp" =~ ^[sSyY] ]]; then
@@ -445,21 +655,34 @@ install_one() {
         fi
     fi
 
-    if [ -n "$APT_DEPS" ]; then
-        echo -e "\n${YELLOW}Dependencias del sistema para $PKG_NAME:${NC}"
-        echo "$APT_DEPS" | sed 's/^/  • /'
+    # ---------------------------
+    # Dependencias del sistema
+    # ---------------------------
+    local SYSTEM_DEPS=""
+    case "$PKG_MANAGER" in
+        apt)    SYSTEM_DEPS="$APT_DEPS" ;;
+        pacman) SYSTEM_DEPS="$PACMAN_DEPS" ;;
+        dnf)    SYSTEM_DEPS="$DNF_DEPS" ;;
+    esac
+
+    if [ -n "$SYSTEM_DEPS" ]; then
+        echo -e "\n${YELLOW}Dependencias del sistema ($PKG_MANAGER) para $PKG_NAME:${NC}"
+        echo "$SYSTEM_DEPS" | sed 's/^/  • /'
         if [ $AUTO_YES -eq 0 ]; then
             read -p "¿Instalar dependencias del sistema? [S/n] " resp < /dev/tty
             if [[ "$resp" =~ ^[Nn] ]]; then
                 echo -e "${YELLOW}Se omitió la instalación de dependencias del sistema.${NC}"
             else
-                install_system_deps "$(echo "$APT_DEPS" | tr '\n' ' ')" || return 1
+                install_system_deps "$(echo "$SYSTEM_DEPS" | tr '\n' ' ')" || return 1
             fi
         else
-            install_system_deps "$(echo "$APT_DEPS" | tr '\n' ' ')" || return 1
+            install_system_deps "$(echo "$SYSTEM_DEPS" | tr '\n' ' ')" || return 1
         fi
     fi
 
+    # ---------------------------
+    # Dependencias pip
+    # ---------------------------
     if [ -n "$PIP_DEPS" ]; then
         echo -e "\n${YELLOW}Dependencias Python para $PKG_NAME:${NC}"
         echo "$PIP_DEPS" | sed 's/^/  • /'
@@ -472,6 +695,24 @@ install_one() {
             fi
         else
             install_pip_deps "$PIP_DEPS" || return 1
+        fi
+    fi
+
+    # ---------------------------
+    # Dependencias Casata
+    # ---------------------------
+    if [ -n "$CASATA_DEPS" ]; then
+        echo -e "\n${YELLOW}Dependencias Casata para $PKG_NAME:${NC}"
+        echo "$CASATA_DEPS" | sed 's/^/  • /'
+        if [ $AUTO_YES -eq 0 ]; then
+            read -p "¿Instalar dependencias Casata? [S/n] " resp < /dev/tty
+            if [[ "$resp" =~ ^[Nn] ]]; then
+                echo -e "${YELLOW}Se omitió la instalación de dependencias Casata.${NC}"
+            else
+                install_casata_deps "$CASATA_DEPS" "$AUTO_YES" || return 1
+            fi
+        else
+            install_casata_deps "$CASATA_DEPS" "$AUTO_YES" || return 1
         fi
     fi
 
@@ -523,7 +764,6 @@ install_one() {
             mkdir -p "$DEST"
             TARGET_LINK="$DEST/$LINK_NAME"
 
-            # --- RESOLUCIÓN CANÓNICA ---
             real_target=$(canonical_path "$TARGET_LINK")
             link_dir=$(dirname "$TARGET_LINK")
             real_dir=$(canonical_path "$link_dir")
@@ -576,7 +816,7 @@ install_one() {
     fi
 
     # ------------------------------------------------------------
-    # NUEVO (Casata 1.2.2): Ejecución de GUIDE.sh para paquetes autorizados
+    # Ejecución de GUIDE.sh para paquetes autorizados
     # ------------------------------------------------------------
     if [ -f "$SINGREPOS_PRIORITY" ]; then
         if grep -qxF "$PKG_NAME" "$SINGREPOS_PRIORITY" 2>/dev/null; then
@@ -615,15 +855,20 @@ install_one() {
     return 0
 }
 
-# --- INICIO DEL SCRIPT (manejo de argumentos y router) ---
+# ============================================================
+# INICIO DEL SCRIPT
+# ============================================================
 if ! command -v jq &>/dev/null || ! command -v wget &>/dev/null; then
     echo -e "${RED}Error: Se requieren 'jq' y 'wget'.${NC}"
     exit 1
 fi
 
+# Variables globales antes de cualquier inicialización
 AUTO_YES=0
 DOWNLOAD_ONLY=0
 PACKAGES=()
+
+init_package_manager
 
 for arg in "$@"; do
     case "$arg" in
