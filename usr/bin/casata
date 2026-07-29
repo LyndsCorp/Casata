@@ -178,7 +178,7 @@ case "$COMMAND" in
 
     motd)
         log_command "$FULL_COMMAND"
-        run_module "motd.sh" "$1"
+        run_module "motd.sh" "$@"
         ;;
 
     *)
