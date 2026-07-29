@@ -94,7 +94,7 @@ case "$COMMAND" in
     listar|list) COMMAND="list" ;;
     informacion|info) COMMAND="info" ;;
     historial|history) COMMAND="history" ;;
-    clean|limpiar) COMMNAND="clean" ;;
+    clean|limpiar) COMNAND="clean" ;;
     motd|news|periodico|novedades) COMMAND="motd" ;;
     --version|-v) COMMAND="--version" ;;
     --help|--h|-h|ayuda|--ayuda|help|--help|-ayuda) COMMAND="--help" ;;
@@ -176,7 +176,7 @@ case "$COMMAND" in
         run_module "list.sh" "$1"
         ;;
 
-    list)
+    motd)
         log_command "$FULL_COMMAND"
         run_module "motd.sh" "$1"
         ;;
