@@ -3,7 +3,7 @@
 # Script de desinstalacion de Casata
 # GPL v3, Aros Legendarios, David Baña Szymaniak
 
-NoInstalar="0" # otro bool value
+NoInstalar="0"
 YaMostrasteHelp="0"
 Purgar="1"
 
