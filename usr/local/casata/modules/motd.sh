@@ -86,6 +86,8 @@ download_today_motd() {
         exit 1
     fi
     mkdir -p "$NEWS_DIR"
+    # Asegurar que el directorio sea accesible
+    chmod 755 "$NEWS_DIR"
     local temp_file=$(mktemp)
     if command -v curl &> /dev/null; then
         curl -s -L -o "$temp_file" "$MOTD_URL"
@@ -103,6 +105,8 @@ download_today_motd() {
     fi
     local dest_file="$NEWS_DIR/${today}.txt"
     mv "$temp_file" "$dest_file"
+    # Hacer el archivo legible para todos los usuarios
+    chmod 644 "$dest_file"
     echo -e "${GREEN}Mensaje del día actualizado a ${today}.${NC}"
     cat "$dest_file"
 }
