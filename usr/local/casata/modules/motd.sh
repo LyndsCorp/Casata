@@ -3,6 +3,7 @@
 # Módulo motd para Casata
 # Muestra el Mensaje del Día almacenado en CASATA_ROOT/news/
 # Con sudo, descarga la última versión desde GitHub
+# Comandos añadidos: random, list y alias de días (español/inglés)
 # Casata 1.3.2
 
 set -euo pipefail
@@ -112,22 +113,105 @@ download_today_motd() {
 }
 
 # ----------------------------------------------------------------------
+# Nuevas funciones para random, list y alias de días
+# ----------------------------------------------------------------------
+
+# Resuelve un alias de día (nombre en español/inglés, o relativo) a DD-MM-YYYY
+# Devuelve 1 si no se reconoce el alias
+resolve_day_alias() {
+    local input="$1"
+    # Convertir a minúsculas para comparación insensible a mayúsculas
+    input=$(echo "$input" | tr '[:upper:]' '[:lower:]')
+
+    # Relativos
+    case "$input" in
+        hoy|today)
+            date +%d-%m-%Y
+            return 0
+            ;;
+        ayer|yesterday)
+            date -d "1 day ago" +%d-%m-%Y
+            return 0
+            ;;
+        anteayer)
+            date -d "2 days ago" +%d-%m-%Y
+            return 0
+            ;;
+    esac
+
+    # Mapeo de nombres de día a número (0=domingo, 1=lunes, ..., 6=sábado)
+    local day_num
+    case "$input" in
+        sunday|domingo)            day_num=0 ;;
+        monday|lunes)              day_num=1 ;;
+        tuesday|martes)            day_num=2 ;;
+        wednesday|miércoles|miercoles) day_num=3 ;;
+        thursday|jueves)           day_num=4 ;;
+        friday|viernes)            day_num=5 ;;
+        saturday|sábado|sabado)    day_num=6 ;;
+        *) return 1 ;;
+    esac
+
+    local today_epoch=$(date +%s)
+    local today_wday=$(date +%w)   # 0=domingo, ..., 6=sábado
+    local target_wday=$day_num
+
+    # Días de diferencia (0 si hoy es ese día, positivo para días pasados)
+    local days_ago=$(( (today_wday - target_wday + 7) % 7 ))
+    local target_epoch=$(( today_epoch - days_ago * 86400 ))
+    date -d "@$target_epoch" +%d-%m-%Y
+    return 0
+}
+
+# Muestra un MOTD aleatorio de entre los disponibles
+show_random_motd() {
+    if [ ! -d "$NEWS_DIR" ]; then
+        echo -e "${RED}No hay mensajes del día disponibles.${NC}"
+        exit 1
+    fi
+    local files=("$NEWS_DIR"/*.txt)
+    if [ ${#files[@]} -eq 0 ]; then
+        echo -e "${RED}No hay mensajes del día disponibles.${NC}"
+        exit 1
+    fi
+    local idx=$(( RANDOM % ${#files[@]} ))
+    local file="${files[$idx]}"
+    local date_str=$(basename "$file" .txt)
+    echo -e "${GREEN}Mensaje del día aleatorio (${date_str}):${NC}"
+    cat "$file"
+}
+
+# Lista todos los días con MOTD almacenados
+list_available_days() {
+    if [ ! -d "$NEWS_DIR" ]; then
+        echo "No hay mensajes del día disponibles."
+        exit 0
+    fi
+    local files=("$NEWS_DIR"/*.txt)
+    if [ ${#files[@]} -eq 0 ]; then
+        echo "No hay mensajes del día disponibles."
+        exit 0
+    fi
+    echo "Días disponibles:"
+    # Mostrar fechas ordenadas
+    for f in "${files[@]}"; do
+        basename "$f" .txt
+    done | sort | while read -r d; do
+        echo "  $d"
+    done
+}
+
+# ----------------------------------------------------------------------
 # Lógica principal
 # ----------------------------------------------------------------------
 
-if [ "$EUID" -eq 0 ]; then
-    # Comportamiento como root
-    if [ $# -eq 0 ]; then
-        # sudo casata motd  -> descarga y muestra el de hoy
+if [ $# -eq 0 ]; then
+    # Sin argumentos: comportamiento clásico
+    if [ "$EUID" -eq 0 ]; then
+        # root: descargar y mostrar el de hoy
         download_today_motd
     else
-        # sudo casata motd <fecha> -> muestra la fecha indicada (no descarga)
-        show_motd_for_date "$1"
-    fi
-else
-    # Usuario normal
-    if [ $# -eq 0 ]; then
-        # Sin argumentos: mostrar el más reciente y avisar si no es hoy
+        # usuario normal: mostrar el más reciente
         latest_file=$(get_latest_file)
         if [ -z "$latest_file" ]; then
             echo "No hay mensajes del día disponibles."
@@ -137,10 +221,27 @@ else
         latest_date=$(basename "$latest_file" .txt)
         cat "$latest_file"
         if [ "$latest_date" != "$today" ]; then
-            echo -e "\n${RED}¡Recuerda pedirle a tu administrador que ejecute sudo casata motd!${NC}"
+            echo -e "\n${RED}¡Recuerda pedirle a tu administrador que ejecute 'sudo casata motd'!${NC}"
         fi
-    else
-        # Con fecha: mostrar esa fecha específica
-        show_motd_for_date "$1"
     fi
+else
+    arg="$1"
+    case "$arg" in
+        random)
+            show_random_motd
+            ;;
+        list)
+            list_available_days
+            ;;
+        *)
+            # Intentar resolver como alias de día
+            resolved_date=$(resolve_day_alias "$arg" || true)
+            if [ -n "$resolved_date" ]; then
+                show_motd_for_date "$resolved_date"
+            else
+                # Si no, interpretar como fecha literal
+                show_motd_for_date "$arg"
+            fi
+            ;;
+    esac
 fi
