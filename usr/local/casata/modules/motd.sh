@@ -4,7 +4,7 @@
 # Muestra el Mensaje del Día almacenado en CASATA_ROOT/news/
 # Con sudo, descarga la última versión desde GitHub
 # Comandos añadidos: random, list y alias de días (español/inglés)
-# Casata 1.3.2
+# Casata 1.3.3
 
 set -euo pipefail
 shopt -s nullglob

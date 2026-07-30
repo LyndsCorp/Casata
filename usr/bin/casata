@@ -94,7 +94,7 @@ case "$COMMAND" in
     listar|list) COMMAND="list" ;;
     informacion|info) COMMAND="info" ;;
     historial|history) COMMAND="history" ;;
-    clean|limpiar) COMNAND="clean" ;;
+    clean|limpiar) COMMAND="clean" ;;
     motd|news|periodico|novedades|mdd|light) COMMAND="motd" ;;
     --version|-v) COMMAND="--version" ;;
     --help|--h|-h|ayuda|--ayuda|help|--help|-ayuda) COMMAND="--help" ;;
