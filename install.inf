@@ -22,7 +22,7 @@ function MostrarHelp()
         echo "  --license (-l): muestra la licencia, proyecto y autor del código."
         echo "  --gpl (--gplv3): muestra el texto completo de la licencia GPL v3."
         echo ""
-        echo "Por cierto: ejecuta `./install.sh --flag` con la terminal abierta en la carpeta de este script."
+        print("Por cierto: ejecuta `./install.sh --flag` con la terminal abierta en la carpeta de este script.")
         YaMostrasteHelp = true
     fi
 fi
