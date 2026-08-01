@@ -4,7 +4,7 @@
 # Muestra el Mensaje del Día almacenado en CASATA_ROOT/news/
 # Con sudo, descarga la última versión desde GitHub
 # Comandos añadidos: random, list y alias de días (español/inglés)
-# Casata 1.3.3
+# Casata 1.3.3.2
 
 set -euo pipefail
 shopt -s nullglob
@@ -29,8 +29,9 @@ normalize_date() {
     if [ ${#parts[@]} -ne 3 ]; then
         return 1
     fi
-    local day=$(printf "%02d" "${parts[0]}" 2>/dev/null)
-    local month=$(printf "%02d" "${parts[1]}" 2>/dev/null)
+    # Forzar base decimal para evitar que 08/09 se interpreten como octales
+    local day=$(printf "%02d" "$((10#${parts[0]}))" 2>/dev/null)
+    local month=$(printf "%02d" "$((10#${parts[1]}))" 2>/dev/null)
     local year="${parts[2]}"
     if [ -z "$day" ] || [ -z "$month" ] || ! [[ "$year" =~ ^[0-9]{4}$ ]]; then
         return 1
