@@ -1,0 +1,4 @@
+update.sh que puedes poner:
+casata update <metarepo> y se actualiza solo ese metarepo
+
+También que puedas instalar paquetes .casata con casata install --file archivos... y esos .casata son archivos tar o cualquier forma de empaquetación. Esos .casata tienen VERSION, GUIDE.json... todo eso
