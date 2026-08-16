@@ -1,4 +1,12 @@
-update.sh que puedes poner:
+update.sh que puedas poner:
 casata update <metarepo> y se actualiza solo ese metarepo
 
-También que puedas instalar paquetes .casata con casata install --file archivos... y esos .casata son archivos tar o cualquier forma de empaquetación. Esos .casata tienen VERSION, GUIDE.json... todo eso
+También que puedas instalar paquetes .casata con casata install --file archivos... (o -f) y esos .casata son archivos tar o cualquier forma de empaquetación. Esos .casata tienen VERSION, GUIDE.json... todo eso
+
+
+NUEVO download.sh que puedas poner:
+casata download paquete
+y solo se descarga el ZIP o TAR del paquete como $HOME/$DOWNLOADS_DIR/$PACKAGE
+(DOWNLOADS_DIR hace caso al `XDG_DOWNLOAD_DIR="$HOME/Descargas"` de ~/.config/user-dirs.dirs)
+Pero tambien que si pones
+casata download --extract (o -e), descomprime el paquete y elimina el paquete comprimido.
