@@ -430,6 +430,12 @@ collect_package_deps() {
     while IFS= read -r dep; do
         [ -n "$dep" ] || continue
 
+        # Comprobar ciclo ANTES de visitar
+        if [ "${IN_STACK[$dep]:-0}" -eq 1 ]; then
+            echo -e "${RED}Error: Ciclo de dependencias detectado: '$pkg' -> '$dep'.${NC}" >&2
+            exit 1
+        fi
+
         if [ "${VISITED_PACKAGES[$dep]:-0}" -eq 0 ]; then
             COLLECTED_CASATA["$dep"]=1
             collect_package_deps "$dep"
@@ -471,17 +477,29 @@ ask_overwrite() {
     local target="$1"
     local app_name="$2"
     local auto_yes="$3"
+
     if [ "$auto_yes" -eq 1 ]; then
-        echo -e "${YELLOW}Usando -y: Sobrescribiendo '$target' automáticamente.${NC}"
-        rm -rf -- "$target"
-        return 0
+        # Solo eliminar archivos o enlaces, nunca directorios
+        if [ -L "$target" ] || [ -f "$target" ]; then
+            rm -f -- "$target"
+            return 0
+        else
+            echo -e "${RED}Error: '$target' es un directorio y no se puede sobrescribir.${NC}"
+            return 1
+        fi
     fi
+
     echo -e "${YELLOW}Advertencia: '$target' ya existe y no es un enlace a $app_name.${NC}"
     read -p "¿Sobrescribirlo? (perderás el archivo original) [s/N/a (abortar)]: " resp < /dev/tty
     if [[ "$resp" =~ ^[sSyY] ]]; then
-        rm -rf -- "$target"
-        echo -e "${GREEN}Archivo eliminado. Continuando...${NC}"
-        return 0
+        if [ -L "$target" ] || [ -f "$target" ]; then
+            rm -f -- "$target"
+            echo -e "${GREEN}Archivo eliminado. Continuando...${NC}"
+            return 0
+        else
+            echo -e "${RED}Error: '$target' es un directorio y no se puede sobrescribir.${NC}"
+            return 1
+        fi
     elif [[ "$resp" =~ ^[aA] ]]; then
         echo -e "${RED}Instalación abortada por el usuario.${NC}"
         exit 1
@@ -824,6 +842,7 @@ install_one() {
     rm -rf "$EXTRACT_DIR" "$ARCHIVE_PATH"
     EXTRACT_DIR=""
 
+    # -d: descargar y extraer, pero sin enlaces ni GUIDE.sh (reemplaza instalación existente)
     [ $DOWNLOAD_ONLY -eq 1 ] && { echo -e "${YELLOW}Descargado en $APP_DIR (sin enlaces).${NC}"; return 0; }
 
     create_symlinks "$APP_DIR" "$GUIDE_TARGET" "$PKG_NAME" "$AUTO_YES"
@@ -965,6 +984,7 @@ install_from_file() {
     rm -rf "$EXTRACT_DIR"
     EXTRACT_DIR=""
 
+    # -d: extraer sin enlaces ni GUIDE.sh (reemplaza instalación existente)
     [ $DOWNLOAD_ONLY -eq 1 ] && { echo -e "${YELLOW}Extraído en $APP_DIR (sin enlaces).${NC}"; return 0; }
 
     create_symlinks "$APP_DIR" "$GUIDE_TARGET" "$PKG_NAME" "$AUTO_YES"
