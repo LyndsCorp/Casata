@@ -1,7 +1,13 @@
 #!/bin/bash
 # /usr/local/casata/modules/download.sh
 # Descarga paquetes de Casata sin instalarlos.
-# Uso: casata download [--extract|-e] <paquete> [paquete2 ...]
+# Uso:
+#   casata download [OPCIONES] <paquete> [paquete2 ...]
+# Opciones:
+#   -e, --extract        Descomprimir después de descargar y eliminar el comprimido.
+#   --path <ruta>        Carpeta de destino. Por defecto se usa XDG_DOWNLOAD_DIR
+#                        o ~/Descargas.
+#   -h, --help           Mostrar esta ayuda.
 
 set -euo pipefail
 
@@ -18,17 +24,46 @@ usage() {
     cat <<'EOF'
 Uso: casata download [OPCIONES] <paquete> [paquete2 ...]
 
-Descarga el archivo ZIP/TAR del paquete en la carpeta de descargas del usuario,
+Descarga el archivo ZIP/TAR del paquete en la carpeta indicada.
+Por defecto se descarga en la carpeta de descargas del usuario,
 respetando XDG_DOWNLOAD_DIR de ~/.config/user-dirs.dirs.
 
 Opciones:
   -e, --extract    Descomprimir el paquete descargado y eliminar el comprimido.
+  --path <ruta>    Carpeta de destino (ej. ~/Documentos).
   -h, --help       Mostrar esta ayuda.
 
 El archivo se guarda como <nombre_original>.casata (ej. app.tar.gz.casata).
 EOF
 }
 
+# ------------------------------------------------------------
+# Expande ~ y $HOME en una ruta dada
+# ------------------------------------------------------------
+expand_download_path() {
+    local path="$1"
+    local home="$2"
+
+    # Reemplazar $HOME y ${HOME}
+    path="${path//\$HOME/$home}"
+    path="${path//\$\{HOME\}/$home}"
+
+    # Expandir ~ al inicio
+    if [[ "$path" == "~"* ]]; then
+        path="$home${path:1}"
+    fi
+
+    # Quitar barra final excepto si es la raíz
+    if [ "$path" != "/" ]; then
+        path="${path%/}"
+    fi
+
+    printf '%s' "$path"
+}
+
+# ------------------------------------------------------------
+# Obtener la carpeta de descargas por defecto desde XDG
+# ------------------------------------------------------------
 get_download_dir() {
     local user_home="$1"
     local user_dirs="$user_home/.config/user-dirs.dirs"
@@ -50,21 +85,12 @@ get_download_dir() {
         return
     fi
 
-    xdg_dir="${xdg_dir//\$HOME/$user_home}"
-    xdg_dir="${xdg_dir//\$\{HOME\}/$user_home}"
-    if [[ "$xdg_dir" == "~"* ]]; then
-        xdg_dir="$user_home${xdg_dir:1}"
-    fi
-    if [[ "$xdg_dir" != /* ]]; then
-        xdg_dir="$user_home/$xdg_dir"
-    fi
-    if [ "$xdg_dir" != "/" ]; then
-        xdg_dir="${xdg_dir%/}"
-    fi
-
-    printf '%s' "$xdg_dir"
+    expand_download_path "$xdg_dir" "$user_home"
 }
 
+# ------------------------------------------------------------
+# Extraer según la extensión original
+# ------------------------------------------------------------
 extract_archive() {
     local archive_path="$1"
     local dest_dir="$2"
@@ -101,6 +127,9 @@ extract_archive() {
     esac
 }
 
+# ------------------------------------------------------------
+# Descargar un paquete
+# ------------------------------------------------------------
 download_one() {
     local pkg="$1"
     local extract="$2"
@@ -178,12 +207,25 @@ if ! command -v jq &>/dev/null || ! command -v wget &>/dev/null; then
 fi
 
 EXTRACT=0
+CUSTOM_PATH=""
 PACKAGES=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -e|--extract)
             EXTRACT=1
+            shift
+            ;;
+        --path)
+            if [ $# -lt 2 ]; then
+                echo -e "${RED}Error: --path requiere un argumento.${NC}" >&2
+                exit 1
+            fi
+            CUSTOM_PATH="$2"
+            shift 2
+            ;;
+        --path=*)
+            CUSTOM_PATH="${1#--path=}"
             shift
             ;;
         -h|--help)
@@ -216,7 +258,12 @@ if [ "${EUID:-0}" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
     fi
 fi
 
-DOWNLOAD_DIR="$(get_download_dir "$TARGET_USER_HOME")"
+# Resolver la carpeta de destino
+if [ -n "$CUSTOM_PATH" ]; then
+    DOWNLOAD_DIR="$(expand_download_path "$CUSTOM_PATH" "$TARGET_USER_HOME")"
+else
+    DOWNLOAD_DIR="$(get_download_dir "$TARGET_USER_HOME")"
+fi
 
 # ==========================
 # Proceso por paquete
