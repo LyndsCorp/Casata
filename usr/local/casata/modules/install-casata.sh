@@ -102,7 +102,7 @@ cp -r "$EXTRACTED/usr/local/casata/modules" "$GLOBAL_ROOT/"
 chmod +x "$GLOBAL_ROOT"/modules/*.sh
 
 # Copiar archivos informativos
-cp -f "$EXTRACTED/usr/local/casata/"{HELP,VERSION,WELCOME} "$GLOBAL_ROOT/" 2>/dev/null
+cp -f "$EXTRACTED/usr/local/casata/"{HELP,VERSION,WELCOME,SAVE_FILES.txt} "$GLOBAL_ROOT/" 2>/dev/null
 
 # ===== FUSIÓN DE REPOSITORIOS (sin borrar los locales) =====
 if [ -d "$EXTRACTED/usr/local/casata/repos" ]; then
