@@ -1,3 +1,7 @@
+Que el HISTORY.txt sea muchisimo más completo, diciendo usuarios y resultados y dependencias instaladas y todo eso.
+
+Que instalar más de un paquete a la vez resuelva las dependencias primero y luego instale todos los paquetes a la vez, en vez de instalarlos en orden y ejecutar varios apt update y apt install en la misma ejecución de Casata.
+
 update.sh que puedas poner:
 casata update <metarepo> y se actualiza solo ese metarepo
 
@@ -17,3 +21,9 @@ Para distinguir, que mire las primeras 4 letras y si son "http" en vez de númer
 Para facilitar la distribución de paquetes de terceros sin necesidad de hacer un fork o cosas así, que los metadatos puedan tener un campo que si es true, entonces Casata no va a utilizar metadatos en el paquete, sino todo del JSON del data.
 Estos tendrían directamente el version y el GUIDE dentro del data en vez del paquete.
 También que el data.json tenga una parte de que el paquete además de utilizar el release oficial, el distribuidor pueda añadir archivos propios que irán en el paquete antes de que la parte de GUIDE haga lo suyo. Sirve para por ejemplo utilizar las releases oficiales de Zen pero teniendo un .desktop propio (ya que las releases suelen no traer un .desktop)
+
+Permitir instalar paquetes .deb con cosas como
+sudo casata install app-deb
+y lo instala con APT.
+Y si no está en un sistema basado en Debian, que dé error y que diga que los distribuidos mediante .deb solo pueden ser instalados en sistemas basados en Debian.
+Y que en data/CASATA-DEB.json se guarde una lista de los .deb que fueron instalados mediante Casata (incluyendo tanto el paquete como sus dependencias que fueron resueltas al instalarse con APT).
