@@ -390,21 +390,22 @@ collect_package_deps() {
 
     if [ "${IN_STACK[$pkg]:-0}" -eq 1 ]; then
         echo -e "${RED}Error: Ciclo de dependencias detectado en '$pkg'.${NC}" >&2
-        exit 1
+        return 1
     fi
 
     if [ "${VISITED_PACKAGES[$pkg]:-0}" -eq 1 ]; then
         return 0
     fi
 
+    # Comprobar que existe metadata ANTES de marcarlo como visitado
+    local pkg_file="$DATA_DIR/${pkg}.json"
+    if [ ! -f "$pkg_file" ]; then
+        echo -e "${RED}Error: Dependencia '$pkg' no encontrada en la base de datos local. Ejecute 'casata update'.${NC}" >&2
+        return 1
+    fi
+
     IN_STACK[$pkg]=1
     VISITED_PACKAGES[$pkg]=1
-
-    local pkg_file="$DATA_DIR/${pkg}.json"
-    [ -f "$pkg_file" ] || {
-        IN_STACK[$pkg]=0
-        return 0
-    }
 
     local dep
 
@@ -430,15 +431,14 @@ collect_package_deps() {
     while IFS= read -r dep; do
         [ -n "$dep" ] || continue
 
-        # Comprobar ciclo ANTES de visitar
         if [ "${IN_STACK[$dep]:-0}" -eq 1 ]; then
             echo -e "${RED}Error: Ciclo de dependencias detectado: '$pkg' -> '$dep'.${NC}" >&2
-            exit 1
+            return 1
         fi
 
         if [ "${VISITED_PACKAGES[$dep]:-0}" -eq 0 ]; then
             COLLECTED_CASATA["$dep"]=1
-            collect_package_deps "$dep"
+            collect_package_deps "$dep" || return 1
             CASATA_ORDER+=("$dep")
         else
             COLLECTED_CASATA["$dep"]=1
@@ -702,7 +702,6 @@ version_check() {
 install_one() {
     local PKG_NAME="$1"
     local AUTO_YES="$2"
-    local DOWNLOAD_ONLY="$3"
 
     [ "$EUID" -ne 0 ] && { echo -e "${RED}Instalación global requiere root.${NC}"; return 1; }
     APPS_DIR="$GLOBAL_ROOT/apps"
@@ -842,9 +841,6 @@ install_one() {
     rm -rf "$EXTRACT_DIR" "$ARCHIVE_PATH"
     EXTRACT_DIR=""
 
-    # -d: descargar y extraer, pero sin enlaces ni GUIDE.sh (reemplaza instalación existente)
-    [ $DOWNLOAD_ONLY -eq 1 ] && { echo -e "${YELLOW}Descargado en $APP_DIR (sin enlaces).${NC}"; return 0; }
-
     create_symlinks "$APP_DIR" "$GUIDE_TARGET" "$PKG_NAME" "$AUTO_YES"
     maybe_run_guide "$PKG_NAME" "$APP_DIR" "$AUTO_YES" "$REPO_VERSION"
 
@@ -858,7 +854,6 @@ install_one() {
 install_from_file() {
     local ARCHIVE_FILE="$1"
     local AUTO_YES="$2"
-    local DOWNLOAD_ONLY="$3"
 
     [ "$EUID" -ne 0 ] && { echo -e "${RED}Instalación global requiere root.${NC}"; return 1; }
 
@@ -984,9 +979,6 @@ install_from_file() {
     rm -rf "$EXTRACT_DIR"
     EXTRACT_DIR=""
 
-    # -d: extraer sin enlaces ni GUIDE.sh (reemplaza instalación existente)
-    [ $DOWNLOAD_ONLY -eq 1 ] && { echo -e "${YELLOW}Extraído en $APP_DIR (sin enlaces).${NC}"; return 0; }
-
     create_symlinks "$APP_DIR" "$GUIDE_TARGET" "$PKG_NAME" "$AUTO_YES"
     maybe_run_guide "$PKG_NAME" "$APP_DIR" "$AUTO_YES" "$REPO_VERSION"
 
@@ -1007,7 +999,6 @@ load_protected_paths
 
 # Variables globales
 AUTO_YES=0
-DOWNLOAD_ONLY=0
 FILE_MODE=0
 PACKAGES=()
 
@@ -1017,7 +1008,6 @@ init_package_manager
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -y) AUTO_YES=1 ;;
-        -d) DOWNLOAD_ONLY=1 ;;
         -f|--file) FILE_MODE=1 ;;
         -*)
             echo -e "${RED}Opción desconocida: $1${NC}"
@@ -1050,7 +1040,7 @@ if [ $FILE_MODE -eq 1 ]; then
         echo -e "\n${GREEN}========================================${NC}"
         echo -e "${GREEN}Instalando desde archivo: $FILE${NC}"
         echo -e "${GREEN}========================================${NC}"
-        if install_from_file "$FILE" "$AUTO_YES" "$DOWNLOAD_ONLY"; then
+        if install_from_file "$FILE" "$AUTO_YES"; then
             echo -e "${GREEN}✔ $FILE instalado correctamente.${NC}"
         else
             echo -e "${RED}✖ Falló la instalación de $FILE.${NC}"
@@ -1073,13 +1063,13 @@ if [ $FILE_MODE -eq 1 ]; then
 fi
 
 # ----------------------------
-# Modo repositorio
+# Modo repositorio (múltiples paquetes)
 # ----------------------------
 if [ ${#PACKAGES[@]} -gt 1 ]; then
     echo -e "\n${YELLOW}Resolviendo dependencias de todos los paquetes solicitados...${NC}"
 
     for PKG in "${PACKAGES[@]}"; do
-        collect_package_deps "$PKG"
+        collect_package_deps "$PKG" || exit 1
     done
 
     ALL_SYSTEM_DEPS=()
@@ -1151,7 +1141,7 @@ if [ ${#PACKAGES[@]} -gt 1 ]; then
         echo -e "\n${GREEN}========================================${NC}"
         echo -e "${GREEN}Instalando: $PKG${NC}"
         echo -e "${GREEN}========================================${NC}"
-        if install_one "$PKG" "$AUTO_YES" "$DOWNLOAD_ONLY"; then
+        if install_one "$PKG" "$AUTO_YES"; then
             echo -e "${GREEN}✔ $PKG instalado correctamente.${NC}"
         else
             echo -e "${RED}✖ Falló la instalación de $PKG.${NC}"
@@ -1181,7 +1171,7 @@ for PKG in "${PACKAGES[@]}"; do
     echo -e "\n${GREEN}========================================${NC}"
     echo -e "${GREEN}Instalando: $PKG${NC}"
     echo -e "${GREEN}========================================${NC}"
-    if install_one "$PKG" "$AUTO_YES" "$DOWNLOAD_ONLY"; then
+    if install_one "$PKG" "$AUTO_YES"; then
         echo -e "${GREEN}✔ $PKG instalado correctamente.${NC}"
     else
         echo -e "${RED}✖ Falló la instalación de $PKG.${NC}"
