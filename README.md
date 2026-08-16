@@ -13,6 +13,20 @@ Casata organiza las aplicaciones como unidades autocontenidas y gestiona su inte
 
 ---
 
+🚀 Objetivo del proyecto
+
+Casata busca convertirse en una capa de gestión de aplicaciones para LyndsOS que:
+
+Simplifica la instalación de software
+
+Evita complejidad de paquetes tradicionales
+
+Mantiene el sistema base estable
+
+Permite un ecosistema propio de aplicaciones
+
+---
+
 ## 🧠 Filosofía del sistema
 
 - Las aplicaciones deben ser simples de instalar y eliminar
@@ -177,9 +191,6 @@ casata add singrepo https://example.com/mc-lan.json
 
 6. Crear enlaces definidos en GUIDE.json
 
-7. Registrar en base de datos
-
-
 ---
 
 🔐 Seguridad
@@ -190,24 +201,15 @@ Prevención de sobrescritura de archivos del sistema
 
 Verificación de enlaces existentes
 
-Abortado automático en conflictos
+Abortado opcional (pregunta s/N) en conflictos
+
+Lista de archivos protegidos que un paquete de Casata nunca podrá tocar (ej. /usr/bin/cat)
+
+Prioridad de metarepos oficiales (para ganar conflictos de nombres si hay)
 
 
 ---
 
-🚀 Objetivo del proyecto
-
-Casata busca convertirse en una capa de gestión de aplicaciones para LyndsOS que:
-
-Simplifica la instalación de software
-
-Evita complejidad de paquetes tradicionales
-
-Mantiene el sistema base estable
-
-Permite un ecosistema propio de aplicaciones
-
----
 
 👥 Colaboradores
 
