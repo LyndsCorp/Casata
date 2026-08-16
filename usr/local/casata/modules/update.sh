@@ -2,10 +2,11 @@
 
 # /usr/local/casata/modules/update.sh
 # Copyright (C) 2026, GPL v3+, Lynds Corp., Aros Legendarios, David Baña Szymaniak
-# Script de actualización de repositorios de Casata (versión 1.3.4)
+# Script de actualización de repositorios de Casata (versión 1.3.4.1)
 
 # Novedades:
-#   - Permite actualizar un único metarepo: casata update <metarepo>
+#   - Permite actualizar varios metarepos: casata update repo1 repo2 ...
+#   - Respeta el orden de PRIORITY entre los metarepos solicitados.
 
 shopt -s nullglob
 set -euo pipefail
@@ -26,7 +27,7 @@ mkdir -p "$METAREPOS_DIR" "$SINGREPOS_DIR" "$DATA_DIR"
 
 # --- Manejo de argumentos ---
 AUTO_SKIP=0
-TARGET_METAREPO=""
+TARGET_METAREPOS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -y)
@@ -38,11 +39,7 @@ while [[ $# -gt 0 ]]; do
             exit 1
             ;;
         *)
-            if [ -n "$TARGET_METAREPO" ]; then
-                echo -e "${RED}Demasiados metarepos especificados. Solo se permite uno.${NC}"
-                exit 1
-            fi
-            TARGET_METAREPO="$1"
+            TARGET_METAREPOS+=("$1")
             shift
             ;;
     esac
@@ -69,19 +66,59 @@ if [ ${#METAREPO_FILES[@]} -eq 0 ]; then
     exit 0
 fi
 
-# --- Resolver metarepo si se especificó uno ---
-TARGET_FILE=""
-if [ -n "$TARGET_METAREPO" ]; then
-    if [ -f "$METAREPOS_DIR/$TARGET_METAREPO" ]; then
-        TARGET_FILE="$METAREPOS_DIR/$TARGET_METAREPO"
-    elif [ -f "$METAREPOS_DIR/$TARGET_METAREPO.json" ]; then
-        TARGET_FILE="$METAREPOS_DIR/$TARGET_METAREPO.json"
-    elif [ -f "$TARGET_METAREPO" ]; then
-        TARGET_FILE="$TARGET_METAREPO"
+# --- Función para resolver un nombre de metarepo a su archivo ---
+resolver_metarepo() {
+    local name="$1"
+    local file=""
+    if [ -f "$METAREPOS_DIR/$name" ]; then
+        file="$METAREPOS_DIR/$name"
+    elif [ -f "$METAREPOS_DIR/$name.json" ]; then
+        file="$METAREPOS_DIR/$name.json"
+    elif [ -f "$name" ]; then
+        file="$name"
     else
-        echo -e "${RED}No se encontró el metarepo '$TARGET_METAREPO' en $METAREPOS_DIR.${NC}"
-        exit 1
+        return 1
     fi
+    printf '%s' "$file"
+}
+
+# --- Leer PRIORITY (si existe) ---
+declare -a PRIORITY_FILES=()
+if [ -f "$PRIORITY_FILE" ]; then
+    while IFS= read -r line; do
+        line=$(echo "$line" | sed 's/#.*//; s/^[[:space:]]*//; s/[[:space:]]*$//')
+        [ -z "$line" ] && continue
+
+        if [ -f "$METAREPOS_DIR/$line" ]; then
+            PRIORITY_FILES+=("$METAREPOS_DIR/$line")
+        elif [ -f "$METAREPOS_DIR/$line.json" ]; then
+            PRIORITY_FILES+=("$METAREPOS_DIR/$line.json")
+        fi
+    done < "$PRIORITY_FILE"
+fi
+
+# --- Resolver metarepos solicitados ---
+declare -a REQUESTED_FILES=()
+if [ ${#TARGET_METAREPOS[@]} -gt 0 ]; then
+    for repo in "${TARGET_METAREPOS[@]}"; do
+        resolved=$(resolver_metarepo "$repo") || {
+            echo -e "${RED}No se encontró el metarepo '$repo' en $METAREPOS_DIR.${NC}"
+            exit 1
+        }
+
+        # Evitar duplicados
+        duplicate=false
+        for f in "${REQUESTED_FILES[@]}"; do
+            if [ "$f" = "$resolved" ]; then
+                duplicate=true
+                break
+            fi
+        done
+
+        if [ "$duplicate" = false ]; then
+            REQUESTED_FILES+=("$resolved")
+        fi
+    done
 fi
 
 # ------------------------------------------------------------
@@ -210,27 +247,37 @@ procesar_metarepo() {
 # ------------------------------------------------------------
 # Procesar metarepos
 # ------------------------------------------------------------
-if [ -n "$TARGET_FILE" ]; then
-    echo -e "\n${BLUE}Actualizando únicamente:${NC} $(basename "$TARGET_FILE" .json)"
-    procesar_metarepo "$TARGET_FILE"
-    TOTAL_METAREPOS=1
+if [ ${#REQUESTED_FILES[@]} -gt 0 ]; then
+    # Ordenar los solicitados respetando PRIORITY
+    declare -A REQUESTED_SET
+    for f in "${REQUESTED_FILES[@]}"; do
+        REQUESTED_SET["$f"]=1
+    done
+
+    declare -a ORDERED_TARGETS=()
+
+    # Primero los que están en PRIORITY, en el orden de PRIORITY
+    for pf in "${PRIORITY_FILES[@]}"; do
+        if [[ -v REQUESTED_SET["$pf"] ]]; then
+            ORDERED_TARGETS+=("$pf")
+            unset REQUESTED_SET["$pf"]
+        fi
+    done
+
+    # Después el resto, en el orden dado por el usuario
+    for f in "${REQUESTED_FILES[@]}"; do
+        if [[ -v REQUESTED_SET["$f"] ]]; then
+            ORDERED_TARGETS+=("$f")
+        fi
+    done
+
+    TOTAL_METAREPOS=${#ORDERED_TARGETS[@]}
+    echo -e "\n${BLUE}Actualizando $TOTAL_METAREPOS metarepo(s) especificado(s)...${NC}"
+    for REPO_FILE in "${ORDERED_TARGETS[@]}"; do
+        procesar_metarepo "$REPO_FILE"
+    done
 else
-    # 1. Cargar metarepos prioritarios desde PRIORITY
-    declare -a PRIORITY_FILES=()
-    if [ -f "$PRIORITY_FILE" ]; then
-        while IFS= read -r line; do
-            line=$(echo "$line" | sed 's/#.*//; s/^[[:space:]]*//; s/[[:space:]]*$//')
-            [ -z "$line" ] && continue
-
-            if [ -f "$METAREPOS_DIR/$line" ]; then
-                PRIORITY_FILES+=("$METAREPOS_DIR/$line")
-            elif [ -f "$METAREPOS_DIR/$line.json" ]; then
-                PRIORITY_FILES+=("$METAREPOS_DIR/$line.json")
-            fi
-        done < "$PRIORITY_FILE"
-    fi
-
-    # 2. Procesar metarepos en orden: primero PRIORITY, luego el resto
+    # Sin metarepos especificados: usar PRIORITY y luego el resto
     TOTAL_PRIORITY=${#PRIORITY_FILES[@]}
     echo -e "${BLUE}Procesando $TOTAL_PRIORITY metarepo(s) prioritario(s)...${NC}"
     for REPO_FILE in "${PRIORITY_FILES[@]}"; do
