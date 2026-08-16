@@ -112,29 +112,14 @@ cleanup() {
 trap cleanup EXIT
 
 # ------------------------------------------------------------
-# Detección del gestor de paquetes (basada en /etc/os-release)
+# Detección del gestor de paquetes
 # ------------------------------------------------------------
 detect_package_manager() {
-    if [ -f /etc/os-release ]; then
-        . /etc/os-release
-        case "$ID_LIKE" in
-            *debian*|*ubuntu*) echo "apt"; return 0 ;;
-            *arch*)            echo "pacman"; return 0 ;;
-            *fedora*|*rhel*|*centos*) echo "dnf"; return 0 ;;
-        esac
-        case "$ID" in
-            debian|ubuntu|linuxmint) echo "apt"; return 0 ;;
-            arch|manjaro|endeavouros) echo "pacman"; return 0 ;;
-            fedora|rhel|centos|rocky|alma) echo "dnf"; return 0 ;;
-        esac
-    fi
-
-    # Fallback a comandos
-    if command -v apt &>/dev/null; then
+    if [ -x /usr/bin/apt ]; then
         echo "apt"
-    elif command -v pacman &>/dev/null; then
+    elif [ -x /usr/bin/pacman ]; then
         echo "pacman"
-    elif command -v dnf &>/dev/null; then
+    elif [ -x /usr/bin/dnf ]; then
         echo "dnf"
     else
         echo ""
