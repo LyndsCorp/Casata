@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==========================================
-# Gestor de Aplicaciones Casata 1.3.2: Tambien es un periodico
+# Gestor de Aplicaciones Casata 1.3.4: Tambien es un periodico
 # Desarrollado por David Baña Szymaniak para LyndsOS
 # Licencia GPL v3, Software Aros Legendarios, David Baña Szymaniak
 #
@@ -154,7 +154,7 @@ case "$COMMAND" in
     update)
         require_root
         log_command "$FULL_COMMAND"
-        run_module "update.sh"
+        run_module "update.sh" "$@"
         ;;
 
     upgrade)
