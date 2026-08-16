@@ -8,7 +8,7 @@
 [X] También que puedas instalar paquetes .casata con casata install --file archivos... (o -f) y esos .casata son archivos tar o cualquier forma de empaquetación. Esos .casata tienen VERSION, GUIDE.json... todo eso
     Esto de --file podría ser un install-file.sh en vez de todo en el install.sh, enrutando como ya hace con el casata install casata al install-casata.sh o podriamos hacerlo en el install.sh igual para tener la misma lógica de los simlinks.
 
-[ ] NUEVO download.sh que puedas poner:
+[X] NUEVO download.sh que puedas poner:
     casata download paquete
     y solo se descarga el ZIP o TAR del paquete como $HOME/$DOWNLOADS_DIR/$PACKAGE
     (DOWNLOADS_DIR hace caso al `XDG_DOWNLOAD_DIR="$HOME/Descargas"` de ~/.config/user-dirs.dirs)
