@@ -3,7 +3,7 @@
 # /usr/local/casata/modules/install.sh
 # Copyright (C) 2026 David Baña Szymaniak
 # GPL v3 License
-# Script de instalar aplicaciones en Casata 1.3.5.1
+# Script de instalar aplicaciones en Casata 1.3.6
 
 shopt -s nullglob
 set -euo pipefail
@@ -73,18 +73,13 @@ load_protected_paths() {
     fi
 
     while IFS= read -r line; do
-        # Eliminar espacios/retornos iniciales y finales
         line="${line#"${line%%[![:space:]]*}"}"
         line="${line%"${line##*[![:space:]]}"}"
-
-        # Ignorar líneas vacías y comentarios
         [[ -z "$line" || "$line" == \#* ]] && continue
 
         if [[ "$line" == */ ]]; then
-            # Es carpeta: quitar la barra final al guardarla
             PROTECTED_DIRS+=("${line%/}")
         else
-            # Es archivo
             PROTECTED_FILES+=("$line")
         fi
     done < "$SAVE_FILES_FILE"
@@ -187,14 +182,12 @@ install_system_deps() {
                 fi
                 ;;
             pacman)
-                # Intento inicial sin sincronizar bases
                 if [ "${AUTO_YES:-0}" -eq 1 ]; then
                     pacman -S --needed --noconfirm $deps && return 0
                 else
                     pacman -S --needed $deps && return 0
                 fi
 
-                # Fallo: pedir sincronización de bases
                 echo -e "${YELLOW}No se encontraron los paquetes. Puede ser necesario sincronizar las bases de datos.${NC}"
                 if [ "${AUTO_YES:-0}" -eq 1 ]; then
                     echo -e "${YELLOW}(AUTO_YES) Sincronizando bases con pacman -Sy... (¡cuidado con actualizaciones parciales!)${NC}"
@@ -256,7 +249,6 @@ install_system_deps() {
         return 0
     fi
 
-    # Fallback si el binario del gestor no existe
     if ! command -v "$PKG_MANAGER" &>/dev/null; then
         echo -e "${YELLOW}El gestor '$PKG_MANAGER' parece no estar disponible. Redetectando...${NC}"
         local detected
@@ -322,11 +314,10 @@ install_pip_deps() {
 # ------------------------------------------------------------
 install_casata_deps() {
     local casata_pkgs="$1"
-    local auto_yes="${2:-0}"            # heredado de install_one
+    local auto_yes="${2:-0}"
 
     [ -z "$casata_pkgs" ] && return 0
 
-    # Inicializar caché si no existe
     if [ ! -f "$CASATA_DEP_CACHE" ]; then
         touch "$CASATA_DEP_CACHE"
     fi
@@ -336,7 +327,6 @@ install_casata_deps() {
     while IFS= read -r pkg; do
         [[ -z "$pkg" ]] && continue
 
-        # Si ya fue procesado en esta resolución, salta
         if grep -qxF "$pkg" "$CASATA_DEP_CACHE"; then
             echo -e "${YELLOW}→ Dependencia Casata '$pkg' ya fue procesada, omitiendo.${NC}"
             continue
@@ -365,7 +355,6 @@ install_casata_deps() {
 collect_package_deps() {
     local pkg="$1"
 
-    # Evitar bucles infinitos
     if [ "${VISITED_PACKAGES[$pkg]:-0}" -eq 1 ]; then
         return 0
     fi
@@ -376,7 +365,6 @@ collect_package_deps() {
 
     local dep
 
-    # Dependencias del sistema
     while IFS= read -r dep; do
         [ -n "$dep" ] && COLLECTED_APT["$dep"]=1
     done < <(jq -r '.apt? // [] | .[]' "$pkg_file" 2>/dev/null || true)
@@ -389,21 +377,19 @@ collect_package_deps() {
         [ -n "$dep" ] && COLLECTED_DNF["$dep"]=1
     done < <(jq -r '.dnf? // [] | .[]' "$pkg_file" 2>/dev/null || true)
 
-    # Dependencias Python
     while IFS= read -r dep; do
         [ -n "$dep" ] && COLLECTED_PIP["$dep"]=1
     done < <(jq -r '.pip? // [] | .[]' "$pkg_file" 2>/dev/null || true)
 
-    # Dependencias Casata (recursivas, en orden topológico)
     while IFS= read -r dep; do
         [ -n "$dep" ] || continue
 
         if [ "${VISITED_PACKAGES[$dep]:-0}" -eq 0 ]; then
             COLLECTED_CASATA["$dep"]=1
             collect_package_deps "$dep"
-            CASATA_ORDER+=("$dep")        # se añade después de sus propias dependencias
+            CASATA_ORDER+=("$dep")
         else
-            COLLECTED_CASATA["$dep"]=1    # ya fue visitado, pero asegurarse de que esté marcado
+            COLLECTED_CASATA["$dep"]=1
         fi
     done < <(jq -r '.casata? // [] | .[]' "$pkg_file" 2>/dev/null || true)
 }
@@ -458,7 +444,198 @@ ask_overwrite() {
 }
 
 # ------------------------------------------------------------
-# Función principal de instalación
+# Extraer archivo descargado o local
+# Devuelve el directorio fuente (SRC_DIR) en variable global SRC_DIR
+# ------------------------------------------------------------
+extract_archive() {
+    local archive_path="$1"
+    local extract_dir="$2"
+
+    case "$(basename "$archive_path")" in
+        *.zip) unzip -q "$archive_path" -d "$extract_dir" ;;
+        *.tar.gz|*.tgz) tar -xzf "$archive_path" -C "$extract_dir" ;;
+        *.tar.xz) tar -xJf "$archive_path" -C "$extract_dir" ;;
+        *.tar) tar -xf "$archive_path" -C "$extract_dir" ;;
+        *) echo -e "${RED}Formato de archivo no soportado.${NC}"; return 1 ;;
+    esac
+
+    SRC_DIR=$(find "$extract_dir" -name "VERSION" -exec dirname {} \; | head -1)
+    [ -z "$SRC_DIR" ] && SRC_DIR=$(find "$extract_dir" -mindepth 1 -maxdepth 1 -type d | head -1)
+    [ -z "$SRC_DIR" ] && SRC_DIR="$extract_dir"
+    return 0
+}
+
+# ------------------------------------------------------------
+# Crear enlaces simbólicos según GUIDE.json con protecciones
+# ------------------------------------------------------------
+create_symlinks() {
+    local app_dir="$1"
+    local guide_target="$2"
+    local pkg_name="$3"
+    local auto_yes="$4"
+
+    local guide_file="$app_dir/$guide_target"
+    if [ ! -f "$guide_file" ]; then
+        echo -e "${YELLOW}Aviso: No se encontró $guide_target. No se crearon enlaces.${NC}"
+        return 0
+    fi
+
+    echo -e "${YELLOW}Configurando enlaces...${NC}"
+    while read -r item; do
+        FILE=$(echo "$item" | jq -r '.file')
+        DEST=$(echo "$item" | jq -r '.dest')
+        LINK_NAME=$(echo "$item" | jq -r '.name')
+        EXECUTABLE=$(echo "$item" | jq -r '.executable // false')
+        [ "$FILE" == "null" ] || [ "$DEST" == "null" ] || [ "$LINK_NAME" == "null" ] && continue
+
+        DEST="${DEST/#\~/$HOME}"
+        DEST="${DEST//\$HOME/$HOME}"
+        mkdir -p "$DEST"
+        TARGET_LINK="$DEST/$LINK_NAME"
+
+        real_target=$(canonical_path "$TARGET_LINK")
+        link_dir=$(dirname "$TARGET_LINK")
+        real_dir=$(canonical_path "$link_dir")
+
+        skip=false
+        for protected in "${PROTECTED_DIRS[@]}"; do
+            real_protected=$(canonical_path "$protected")
+            if [ "$real_dir" = "$real_protected" ] || [[ "$real_dir" == "$real_protected/"* ]]; then
+                echo -e "${RED}🚫  Error de seguridad: No se permite crear enlaces en '$link_dir' (directorio protegido). Enlace '$LINK_NAME' omitido.${NC}"
+                skip=true
+                break
+            fi
+        done
+        $skip && continue
+
+        for protected in "${PROTECTED_FILES[@]}"; do
+            real_protected=$(canonical_path "$protected")
+            if [ "$real_target" = "$real_protected" ]; then
+                echo -e "${RED}🚫  Error de seguridad: No se permite sobrescribir el archivo protegido '$protected'. Enlace '$LINK_NAME' omitido.${NC}"
+                skip=true
+                break
+            fi
+        done
+        $skip && continue
+
+        if [ -e "$TARGET_LINK" ] || [ -L "$TARGET_LINK" ]; then
+            if [ -L "$TARGET_LINK" ] && [ "$(readlink "$TARGET_LINK")" == "$app_dir/$FILE" ]; then
+                echo -e "   ${YELLOW}[!] Enlace existente de la misma app: $LINK_NAME → se reemplazará.${NC}"
+                rm -f "$TARGET_LINK"
+            else
+                if ! ask_overwrite "$TARGET_LINK" "$pkg_name" "$auto_yes"; then
+                    continue
+                fi
+            fi
+        fi
+
+        ln -s "$app_dir/$FILE" "$TARGET_LINK"
+        if [ "$EXECUTABLE" == "true" ]; then
+            chmod +x "$app_dir/$FILE"
+            echo -e "   [+] Enlazado (ejecutable): $LINK_NAME -> $DEST"
+        else
+            echo -e "   [+] Enlazado: $LINK_NAME -> $DEST"
+        fi
+    done < <(jq -c '.links[]' "$guide_file")
+}
+
+# ------------------------------------------------------------
+# Ejecutar GUIDE.sh si el paquete está en la lista prioritaria
+# ------------------------------------------------------------
+maybe_run_guide() {
+    local pkg_name="$1"
+    local app_dir="$2"
+    local auto_yes="$3"
+    local repo_version="$4"
+
+    if [ -f "$SINGREPOS_PRIORITY" ] && grep -qxF "$pkg_name" "$SINGREPOS_PRIORITY" 2>/dev/null; then
+        echo -e "\n${YELLOW}Este paquete puede modificar archivos del sistema.${NC}"
+        echo -e "\nRepositorio autorizado:"
+        echo -e "  ${GREEN}$pkg_name${NC}"
+        echo ""
+        if [ $auto_yes -eq 1 ]; then
+            echo -e "${YELLOW}Usando -y: se ejecutará GUIDE.sh automáticamente.${NC}"
+        else
+            read -p "¿Continuar? (S/n): " resp < /dev/tty
+            if [[ ! "$resp" =~ ^[SsYy]?$ ]]; then
+                echo -e "${YELLOW}Modificaciones del sistema omitidas. Puede ejecutar manualmente GUIDE.sh desde $app_dir.${NC}"
+                echo -e "${GREEN}¡$pkg_name instalado correctamente! (versión $repo_version)${NC}"
+                return 0
+            fi
+        fi
+
+        local guide_script="$app_dir/GUIDE.sh"
+        if [ -f "$guide_script" ]; then
+            echo -e "${YELLOW}Ejecutando GUIDE.sh...${NC}"
+            if bash "$guide_script"; then
+                echo -e "${GREEN}✓ GUIDE.sh ejecutado correctamente.${NC}"
+            else
+                echo -e "${RED}Error al ejecutar GUIDE.sh. La instalación puede estar incompleta.${NC}"
+                return 1
+            fi
+        else
+            echo -e "${RED}Error: No se encontró GUIDE.sh en el paquete.${NC}"
+            return 1
+        fi
+    fi
+    return 0
+}
+
+# ------------------------------------------------------------
+# Comprobación de versión y posible actualización
+# Retorna: 0 = continuar instalación, 1 = abortar
+# ------------------------------------------------------------
+version_check() {
+    local app_dir="$1"
+    local pkg_name="$2"
+    local repo_version="$3"
+    local auto_yes="$4"
+
+    if [ -d "$app_dir" ]; then
+        if [ -f "$app_dir/VERSION" ]; then
+            local installed_version
+            installed_version=$(cat "$app_dir/VERSION")
+            echo -e "${YELLOW}Versión instalada: $installed_version${NC}"
+            echo -e "${YELLOW}Versión del paquete: $repo_version${NC}"
+            local older
+            older=$(printf '%s\n' "$installed_version" "$repo_version" | sort -V | head -n1)
+            if [ "$older" = "$installed_version" ] && [ "$installed_version" != "$repo_version" ]; then
+                echo -e "${GREEN}Hay una actualización disponible.${NC}"
+                return 0
+            elif [ "$installed_version" = "$repo_version" ]; then
+                echo -e "${GREEN}Ya tienes la última versión.${NC}"
+                if [ $auto_yes -eq 0 ]; then
+                    read -p "¿Reinstalar igualmente? [s/N] " rein < /dev/tty
+                    [[ ! "$rein" =~ ^[sSyY] ]] && return 1
+                else
+                    echo -e "${YELLOW}Usando -y: se reinstalará.${NC}"
+                fi
+                return 0
+            else
+                echo -e "${YELLOW}La versión instalada ($installed_version) es más reciente que la del paquete ($repo_version).${NC}"
+                if [ $auto_yes -eq 0 ]; then
+                    read -p "¿Quieres actualizar (downgrade) a la versión del paquete? [s/N] " resp < /dev/tty
+                    if [[ "$resp" =~ ^[sSyY] ]]; then
+                        return 0
+                    else
+                        echo -e "${YELLOW}No se hará nada.${NC}"
+                        return 1
+                    fi
+                else
+                    echo -e "${YELLOW}Usando -y: se actualizará (downgrade) automáticamente.${NC}"
+                    return 0
+                fi
+            fi
+        else
+            echo -e "${YELLOW}Paquete instalado pero sin archivo VERSION. Se reinstalará.${NC}"
+            return 0
+        fi
+    fi
+    return 0
+}
+
+# ------------------------------------------------------------
+# Instalación desde repositorio (función original adaptada)
 # ------------------------------------------------------------
 install_one() {
     local PKG_NAME="$1"
@@ -492,57 +669,14 @@ install_one() {
 
     REPO_VERSION=$(jq -r '.version // "0.0.0"' "$PKG_FILE")
 
-    # Leer dependencias con tolerancia a string único
     APT_DEPS=$(jq -r '.apt? // [] | .[]' "$PKG_FILE")
     PACMAN_DEPS=$(jq -r '.pacman? // [] | .[]' "$PKG_FILE")
     DNF_DEPS=$(jq -r '.dnf? // [] | .[]' "$PKG_FILE")
     PIP_DEPS=$(jq -r '.pip? // [] | .[]' "$PKG_FILE")
     CASATA_DEPS=$(jq -r '.casata? // [] | .[]' "$PKG_FILE")
 
-    INSTALLED_VERSION=""
-    NEED_UPDATE=0
-    if [ -d "$APP_DIR" ]; then
-        if [ -f "$APP_DIR/VERSION" ]; then
-            INSTALLED_VERSION=$(cat "$APP_DIR/VERSION")
-            echo -e "${YELLOW}Versión instalada: $INSTALLED_VERSION${NC}"
-            echo -e "${YELLOW}Versión en repositorio: $REPO_VERSION${NC}"
-            OLDER=$(printf '%s\n' "$INSTALLED_VERSION" "$REPO_VERSION" | sort -V | head -n1)
-            if [ "$OLDER" = "$INSTALLED_VERSION" ] && [ "$INSTALLED_VERSION" != "$REPO_VERSION" ]; then
-                NEED_UPDATE=1
-                echo -e "${GREEN}Hay una actualización disponible.${NC}"
-            elif [ "$INSTALLED_VERSION" = "$REPO_VERSION" ]; then
-                echo -e "${GREEN}Ya tienes la última versión.${NC}"
-                if [ $AUTO_YES -eq 0 ]; then
-                    read -p "¿Reinstalar igualmente? [s/N] " rein < /dev/tty
-                    [[ ! "$rein" =~ ^[sSyY] ]] && return 0
-                    NEED_UPDATE=2
-                else
-                    echo -e "${YELLOW}Usando -y: se reinstalará.${NC}"
-                    NEED_UPDATE=2
-                fi
-            else
-                echo -e "${YELLOW}La versión instalada ($INSTALLED_VERSION) es más reciente que la del repositorio ($REPO_VERSION).${NC}"
-                if [ $AUTO_YES -eq 0 ]; then
-                    read -p "¿Quieres actualizar (downgrade) a la versión del repositorio? [s/N] " resp < /dev/tty
-                    if [[ "$resp" =~ ^[sSyY] ]]; then
-                        NEED_UPDATE=2
-                    else
-                        echo -e "${YELLOW}No se hará nada.${NC}"
-                        return 0
-                    fi
-                else
-                    echo -e "${YELLOW}Usando -y: se actualizará (downgrade) automáticamente.${NC}"
-                    NEED_UPDATE=2
-                fi
-            fi
-        else
-            echo -e "${YELLOW}Paquete instalado pero sin archivo VERSION. Se reinstalará.${NC}"
-            NEED_UPDATE=2
-        fi
-    fi
-
     # ---------------------------
-    # Dependencias del sistema
+    # Dependencias
     # ---------------------------
     if [ "${SKIP_SYSTEM_DEPS:-0}" -eq 0 ]; then
         local SYSTEM_DEPS=""
@@ -568,50 +702,44 @@ install_one() {
         fi
     fi
 
-    # ---------------------------
-    # Dependencias pip
-    # ---------------------------
-    if [ "${SKIP_PIP_DEPS:-0}" -eq 0 ]; then
-        if [ -n "$PIP_DEPS" ]; then
-            echo -e "\n${YELLOW}Dependencias Python para $PKG_NAME:${NC}"
-            echo "$PIP_DEPS" | sed 's/^/  • /'
-            if [ $AUTO_YES -eq 0 ]; then
-                read -p "¿Instalar dependencias Python con pip? [S/n] " resp < /dev/tty
-                if [[ "$resp" =~ ^[Nn] ]]; then
-                    echo -e "${YELLOW}Se omitió la instalación de dependencias pip.${NC}"
-                else
-                    install_pip_deps "$PIP_DEPS" || return 1
-                fi
+    if [ "${SKIP_PIP_DEPS:-0}" -eq 0 ] && [ -n "$PIP_DEPS" ]; then
+        echo -e "\n${YELLOW}Dependencias Python para $PKG_NAME:${NC}"
+        echo "$PIP_DEPS" | sed 's/^/  • /'
+        if [ $AUTO_YES -eq 0 ]; then
+            read -p "¿Instalar dependencias Python con pip? [S/n] " resp < /dev/tty
+            if [[ "$resp" =~ ^[Nn] ]]; then
+                echo -e "${YELLOW}Se omitió la instalación de dependencias pip.${NC}"
             else
                 install_pip_deps "$PIP_DEPS" || return 1
             fi
+        else
+            install_pip_deps "$PIP_DEPS" || return 1
         fi
     fi
 
-    # ---------------------------
-    # Dependencias Casata
-    # ---------------------------
-    if [ "${SKIP_CASATA_DEPS:-0}" -eq 0 ]; then
-        if [ -n "$CASATA_DEPS" ]; then
-            echo -e "\n${YELLOW}Dependencias Casata para $PKG_NAME:${NC}"
-            echo "$CASATA_DEPS" | sed 's/^/  • /'
-            if [ $AUTO_YES -eq 0 ]; then
-                read -p "¿Instalar dependencias Casata? [S/n] " resp < /dev/tty
-                if [[ "$resp" =~ ^[Nn] ]]; then
-                    echo -e "${YELLOW}Se omitió la instalación de dependencias Casata.${NC}"
-                else
-                    install_casata_deps "$CASATA_DEPS" "$AUTO_YES" || return 1
-                fi
+    if [ "${SKIP_CASATA_DEPS:-0}" -eq 0 ] && [ -n "$CASATA_DEPS" ]; then
+        echo -e "\n${YELLOW}Dependencias Casata para $PKG_NAME:${NC}"
+        echo "$CASATA_DEPS" | sed 's/^/  • /'
+        if [ $AUTO_YES -eq 0 ]; then
+            read -p "¿Instalar dependencias Casata? [S/n] " resp < /dev/tty
+            if [[ "$resp" =~ ^[Nn] ]]; then
+                echo -e "${YELLOW}Se omitió la instalación de dependencias Casata.${NC}"
             else
                 install_casata_deps "$CASATA_DEPS" "$AUTO_YES" || return 1
             fi
+        else
+            install_casata_deps "$CASATA_DEPS" "$AUTO_YES" || return 1
         fi
     fi
 
-    if [ $NEED_UPDATE -eq 1 ] || [ $NEED_UPDATE -eq 2 ]; then
-        echo -e "${YELLOW}Preparando actualización/reinstalación...${NC}"
-        force_remove "$APP_DIR" "$GUIDE_TARGET"
+    # ---------------------------
+    # Version check
+    # ---------------------------
+    if ! version_check "$APP_DIR" "$PKG_NAME" "$REPO_VERSION" "$AUTO_YES"; then
+        return 0
     fi
+
+    force_remove "$APP_DIR" "$GUIDE_TARGET"
 
     mkdir -p "$APP_DIR"
     ARCHIVE_NAME=$(basename "$DOWNLOAD_URL" | cut -d '?' -f1)
@@ -621,16 +749,7 @@ install_one() {
     echo -e "${GREEN}Descargando $PKG_NAME...${NC}"
     wget -q --show-progress -O "$ARCHIVE_PATH" "$DOWNLOAD_URL" || { echo -e "${RED}Error descarga.${NC}"; return 1; }
 
-    case "$ARCHIVE_NAME" in
-        *.zip) unzip -q "$ARCHIVE_PATH" -d "$EXTRACT_DIR" ;;
-        *.tar.gz|*.tgz) tar -xzf "$ARCHIVE_PATH" -C "$EXTRACT_DIR" ;;
-        *.tar.xz) tar -xJf "$ARCHIVE_PATH" -C "$EXTRACT_DIR" ;;
-        *) echo -e "${RED}Formato no soportado.${NC}"; return 1 ;;
-    esac
-
-    SRC_DIR=$(find "$EXTRACT_DIR" -name "VERSION" -exec dirname {} \; | head -1)
-    [ -z "$SRC_DIR" ] && SRC_DIR=$(find "$EXTRACT_DIR" -mindepth 1 -maxdepth 1 -type d | head -1)
-    [ -z "$SRC_DIR" ] && SRC_DIR="$EXTRACT_DIR"
+    extract_archive "$ARCHIVE_PATH" "$EXTRACT_DIR" || return 1
 
     mv "$SRC_DIR"/* "$APP_DIR/" 2>/dev/null || mv "$SRC_DIR"/.??* "$APP_DIR/" 2>/dev/null || true
     rm -rf "$EXTRACT_DIR" "$ARCHIVE_PATH"
@@ -638,110 +757,143 @@ install_one() {
 
     [ $DOWNLOAD_ONLY -eq 1 ] && { echo -e "${YELLOW}Descargado en $APP_DIR (sin enlaces).${NC}"; return 0; }
 
-    # ------------------------------------------------
-    # Crear enlaces simbólicos CON PROTECCIONES ACTIVAS
-    # ------------------------------------------------
-    echo -e "${YELLOW}Configurando enlaces...${NC}"
-    GUIDE_FILE="$APP_DIR/$GUIDE_TARGET"
-    if [ -f "$GUIDE_FILE" ]; then
-        while read -r item; do
-            FILE=$(echo "$item" | jq -r '.file')
-            DEST=$(echo "$item" | jq -r '.dest')
-            LINK_NAME=$(echo "$item" | jq -r '.name')
-            EXECUTABLE=$(echo "$item" | jq -r '.executable // false')
-            [ "$FILE" == "null" ] || [ "$DEST" == "null" ] || [ "$LINK_NAME" == "null" ] && continue
+    create_symlinks "$APP_DIR" "$GUIDE_TARGET" "$PKG_NAME" "$AUTO_YES"
+    maybe_run_guide "$PKG_NAME" "$APP_DIR" "$AUTO_YES" "$REPO_VERSION"
 
-            DEST="${DEST/#\~/$HOME}"
-            DEST="${DEST//\$HOME/$HOME}"
-            mkdir -p "$DEST"
-            TARGET_LINK="$DEST/$LINK_NAME"
+    echo -e "${GREEN}¡$PKG_NAME instalado correctamente! (versión $REPO_VERSION)${NC}"
+    return 0
+}
 
-            real_target=$(canonical_path "$TARGET_LINK")
-            link_dir=$(dirname "$TARGET_LINK")
-            real_dir=$(canonical_path "$link_dir")
+# ------------------------------------------------------------
+# Instalación desde archivo .casata local
+# ------------------------------------------------------------
+install_from_file() {
+    local ARCHIVE_FILE="$1"
+    local AUTO_YES="$2"
+    local DOWNLOAD_ONLY="$3"
 
-            # --- VERIFICACIÓN DE DIRECTORIOS PROTEGIDOS ---
-            skip=false
-            for protected in "${PROTECTED_DIRS[@]}"; do
-                real_protected=$(canonical_path "$protected")
-                if [ "$real_dir" = "$real_protected" ] || [[ "$real_dir" == "$real_protected/"* ]]; then
-                    echo -e "${RED}🚫  Error de seguridad: No se permite crear enlaces en '$link_dir' (directorio protegido). Enlace '$LINK_NAME' omitido.${NC}"
-                    skip=true
-                    break
-                fi
-            done
-            $skip && continue
+    [ "$EUID" -ne 0 ] && { echo -e "${RED}Instalación global requiere root.${NC}"; return 1; }
 
-            # --- VERIFICACIÓN DE ARCHIVOS PROTEGIDOS ---
-            for protected in "${PROTECTED_FILES[@]}"; do
-                real_protected=$(canonical_path "$protected")
-                if [ "$real_target" = "$real_protected" ]; then
-                    echo -e "${RED}🚫  Error de seguridad: No se permite sobrescribir el archivo protegido '$protected'. Enlace '$LINK_NAME' omitido.${NC}"
-                    skip=true
-                    break
-                fi
-            done
-            $skip && continue
-
-            # --- Gestión de sobrescritura normal ---
-            if [ -e "$TARGET_LINK" ] || [ -L "$TARGET_LINK" ]; then
-                if [ -L "$TARGET_LINK" ] && [ "$(readlink "$TARGET_LINK")" == "$APP_DIR/$FILE" ]; then
-                    echo -e "   ${YELLOW}[!] Enlace existente de la misma app: $LINK_NAME → se reemplazará.${NC}"
-                    rm -f "$TARGET_LINK"
-                else
-                    if ! ask_overwrite "$TARGET_LINK" "$PKG_NAME" "$AUTO_YES"; then
-                        continue
-                    fi
-                fi
-            fi
-
-            ln -s "$APP_DIR/$FILE" "$TARGET_LINK"
-            if [ "$EXECUTABLE" == "true" ]; then
-                chmod +x "$APP_DIR/$FILE"
-                echo -e "   [+] Enlazado (ejecutable): $LINK_NAME -> $DEST"
-            else
-                echo -e "   [+] Enlazado: $LINK_NAME -> $DEST"
-            fi
-        done < <(jq -c '.links[]' "$GUIDE_FILE")
-    else
-        echo -e "${YELLOW}Aviso: No se encontró $GUIDE_TARGET. No se crearon enlaces.${NC}"
+    if [ ! -f "$ARCHIVE_FILE" ]; then
+        echo -e "${RED}Error: Archivo no encontrado: $ARCHIVE_FILE${NC}"
+        return 1
     fi
 
-    # ------------------------------------------------------------
-    # Ejecución de GUIDE.sh para paquetes autorizados
-    # ------------------------------------------------------------
-    if [ -f "$SINGREPOS_PRIORITY" ]; then
-        if grep -qxF "$PKG_NAME" "$SINGREPOS_PRIORITY" 2>/dev/null; then
-            echo -e "\n${YELLOW}Este paquete puede modificar archivos del sistema.${NC}"
-            echo -e "\nRepositorio autorizado:"
-            echo -e "  ${GREEN}$PKG_NAME${NC}"
-            echo ""
-            if [ $AUTO_YES -eq 1 ]; then
-                echo -e "${YELLOW}Usando -y: se ejecutará GUIDE.sh automáticamente.${NC}"
-            else
-                read -p "¿Continuar? (S/n): " resp < /dev/tty
-                if [[ ! "$resp" =~ ^[SsYy]?$ ]]; then
-                    echo -e "${YELLOW}Modificaciones del sistema omitidas. Puede ejecutar manualmente GUIDE.sh desde $APP_DIR.${NC}"
-                    echo -e "${GREEN}¡$PKG_NAME instalado correctamente! (versión $REPO_VERSION)${NC}"
-                    return 0
-                fi
-            fi
+    # Determinar nombre del paquete a partir del nombre del archivo
+    local PKG_NAME
+    PKG_NAME=$(basename "$ARCHIVE_FILE")
+    PKG_NAME="${PKG_NAME%.casata}"
+    PKG_NAME="${PKG_NAME%.tar.gz}"
+    PKG_NAME="${PKG_NAME%.tgz}"
+    PKG_NAME="${PKG_NAME%.tar.xz}"
+    PKG_NAME="${PKG_NAME%.zip}"
+    PKG_NAME="${PKG_NAME%.tar}"
 
-            GUIDE_SCRIPT="$APP_DIR/GUIDE.sh"
-            if [ -f "$GUIDE_SCRIPT" ]; then
-                echo -e "${YELLOW}Ejecutando GUIDE.sh...${NC}"
-                if bash "$GUIDE_SCRIPT"; then
-                    echo -e "${GREEN}✓ GUIDE.sh ejecutado correctamente.${NC}"
+    APPS_DIR="$GLOBAL_ROOT/apps"
+    GUIDE_TARGET="GUIDE.json"
+    mkdir -p "$APPS_DIR"
+    APP_DIR="$APPS_DIR/$PKG_NAME"
+
+    # Extraer temporalmente para leer VERSION y DEPS.json
+    EXTRACT_DIR=$(mktemp -d)
+
+    echo -e "${GREEN}Extrayendo $PKG_NAME desde archivo local...${NC}"
+    extract_archive "$ARCHIVE_FILE" "$EXTRACT_DIR" || { rm -rf "$EXTRACT_DIR"; return 1; }
+
+    # Leer versión del paquete
+    if [ -f "$SRC_DIR/VERSION" ]; then
+        REPO_VERSION=$(cat "$SRC_DIR/VERSION")
+    else
+        echo -e "${RED}Error: El paquete no contiene archivo VERSION.${NC}"
+        rm -rf "$EXTRACT_DIR"
+        return 1
+    fi
+
+    # Leer dependencias opcionales (DEPS.json)
+    local APT_DEPS="" PACMAN_DEPS="" DNF_DEPS="" PIP_DEPS="" CASATA_DEPS=""
+    if [ -f "$SRC_DIR/DEPS.json" ]; then
+        echo -e "${YELLOW}Se encontró DEPS.json, procesando dependencias...${NC}"
+        APT_DEPS=$(jq -r '.apt? // [] | .[]' "$SRC_DIR/DEPS.json" 2>/dev/null || true)
+        PACMAN_DEPS=$(jq -r '.pacman? // [] | .[]' "$SRC_DIR/DEPS.json" 2>/dev/null || true)
+        DNF_DEPS=$(jq -r '.dnf? // [] | .[]' "$SRC_DIR/DEPS.json" 2>/dev/null || true)
+        PIP_DEPS=$(jq -r '.pip? // [] | .[]' "$SRC_DIR/DEPS.json" 2>/dev/null || true)
+        CASATA_DEPS=$(jq -r '.casata? // [] | .[]' "$SRC_DIR/DEPS.json" 2>/dev/null || true)
+    fi
+
+    # Instalar dependencias si existen
+    if [ "${SKIP_SYSTEM_DEPS:-0}" -eq 0 ]; then
+        local SYSTEM_DEPS=""
+        case "$PKG_MANAGER" in
+            apt)    SYSTEM_DEPS="$APT_DEPS" ;;
+            pacman) SYSTEM_DEPS="$PACMAN_DEPS" ;;
+            dnf)    SYSTEM_DEPS="$DNF_DEPS" ;;
+        esac
+
+        if [ -n "$SYSTEM_DEPS" ]; then
+            echo -e "\n${YELLOW}Dependencias del sistema ($PKG_MANAGER) para $PKG_NAME:${NC}"
+            echo "$SYSTEM_DEPS" | sed 's/^/  • /'
+            if [ $AUTO_YES -eq 0 ]; then
+                read -p "¿Instalar dependencias del sistema? [S/n] " resp < /dev/tty
+                if [[ "$resp" =~ ^[Nn] ]]; then
+                    echo -e "${YELLOW}Se omitió la instalación de dependencias del sistema.${NC}"
                 else
-                    echo -e "${RED}Error al ejecutar GUIDE.sh. La instalación puede estar incompleta.${NC}"
-                    return 1
+                    install_system_deps "$(echo "$SYSTEM_DEPS" | tr '\n' ' ')" || { rm -rf "$EXTRACT_DIR"; return 1; }
                 fi
             else
-                echo -e "${RED}Error: No se encontró GUIDE.sh en el paquete.${NC}"
-                return 1
+                install_system_deps "$(echo "$SYSTEM_DEPS" | tr '\n' ' ')" || { rm -rf "$EXTRACT_DIR"; return 1; }
             fi
         fi
     fi
+
+    if [ "${SKIP_PIP_DEPS:-0}" -eq 0 ] && [ -n "$PIP_DEPS" ]; then
+        echo -e "\n${YELLOW}Dependencias Python para $PKG_NAME:${NC}"
+        echo "$PIP_DEPS" | sed 's/^/  • /'
+        if [ $AUTO_YES -eq 0 ]; then
+            read -p "¿Instalar dependencias Python con pip? [S/n] " resp < /dev/tty
+            if [[ "$resp" =~ ^[Nn] ]]; then
+                echo -e "${YELLOW}Se omitió la instalación de dependencias pip.${NC}"
+            else
+                install_pip_deps "$PIP_DEPS" || { rm -rf "$EXTRACT_DIR"; return 1; }
+            fi
+        else
+            install_pip_deps "$PIP_DEPS" || { rm -rf "$EXTRACT_DIR"; return 1; }
+        fi
+    fi
+
+    if [ "${SKIP_CASATA_DEPS:-0}" -eq 0 ] && [ -n "$CASATA_DEPS" ]; then
+        echo -e "\n${YELLOW}Dependencias Casata para $PKG_NAME:${NC}"
+        echo "$CASATA_DEPS" | sed 's/^/  • /'
+        if [ $AUTO_YES -eq 0 ]; then
+            read -p "¿Instalar dependencias Casata? [S/n] " resp < /dev/tty
+            if [[ "$resp" =~ ^[Nn] ]]; then
+                echo -e "${YELLOW}Se omitió la instalación de dependencias Casata.${NC}"
+            else
+                install_casata_deps "$CASATA_DEPS" "$AUTO_YES" || { rm -rf "$EXTRACT_DIR"; return 1; }
+            fi
+        else
+            install_casata_deps "$CASATA_DEPS" "$AUTO_YES" || { rm -rf "$EXTRACT_DIR"; return 1; }
+        fi
+    fi
+
+    # Comprobación de versión
+    if ! version_check "$APP_DIR" "$PKG_NAME" "$REPO_VERSION" "$AUTO_YES"; then
+        rm -rf "$EXTRACT_DIR"
+        return 0
+    fi
+
+    # Eliminar instalación anterior si se continúa
+    force_remove "$APP_DIR" "$GUIDE_TARGET"
+
+    # Mover contenido extraído al directorio final
+    mkdir -p "$APP_DIR"
+    mv "$SRC_DIR"/* "$APP_DIR/" 2>/dev/null || mv "$SRC_DIR"/.??* "$APP_DIR/" 2>/dev/null || true
+    rm -rf "$EXTRACT_DIR"
+    EXTRACT_DIR=""
+
+    [ $DOWNLOAD_ONLY -eq 1 ] && { echo -e "${YELLOW}Extraído en $APP_DIR (sin enlaces).${NC}"; return 0; }
+
+    create_symlinks "$APP_DIR" "$GUIDE_TARGET" "$PKG_NAME" "$AUTO_YES"
+    maybe_run_guide "$PKG_NAME" "$APP_DIR" "$AUTO_YES" "$REPO_VERSION"
 
     echo -e "${GREEN}¡$PKG_NAME instalado correctamente! (versión $REPO_VERSION)${NC}"
     return 0
@@ -758,40 +910,76 @@ fi
 # Cargar rutas protegidas desde SAVE_FILES.txt
 load_protected_paths
 
-# Variables globales antes de cualquier inicialización
+# Variables globales
 AUTO_YES=0
 DOWNLOAD_ONLY=0
+FILE_MODE=0
 PACKAGES=()
 
 init_package_manager
 
-for arg in "$@"; do
-    case "$arg" in
+# Parseo de argumentos
+while [[ $# -gt 0 ]]; do
+    case "$1" in
         -y) AUTO_YES=1 ;;
         -d) DOWNLOAD_ONLY=1 ;;
+        -f|--file) FILE_MODE=1 ;;
         -*)
-            echo -e "${RED}Opción desconocida: $arg${NC}"
+            echo -e "${RED}Opción desconocida: $1${NC}"
             exit 1
             ;;
-        *) PACKAGES+=("$arg") ;;
+        *) PACKAGES+=("$1") ;;
     esac
+    shift
 done
 
 if [ ${#PACKAGES[@]} -eq 0 ]; then
-    echo -e "${RED}Error: Falta el nombre del paquete.${NC}"
+    echo -e "${RED}Error: Falta el nombre del paquete o archivo .casata.${NC}"
     exit 1
 fi
 
-if [ ${#PACKAGES[@]} -eq 1 ] && [ "${PACKAGES[0]}" == "casata" ]; then
+# Redirigir actualización de Casata si es el único paquete y no es modo archivo
+if [ $FILE_MODE -eq 0 ] && [ ${#PACKAGES[@]} -eq 1 ] && [ "${PACKAGES[0]}" == "casata" ]; then
     echo -e "${GREEN}Redirigiendo a la actualización de Casata...${NC}"
     exec "$GLOBAL_ROOT/modules/install-casata.sh" "$@"
     echo -e "${RED}Error: No se pudo ejecutar el módulo de actualización de Casata.${NC}"
     exit 1
 fi
 
-# ------------------------------------------------------------
-# MODO MULTI-PAQUETE: resolver dependencias primero
-# ------------------------------------------------------------
+# ----------------------------
+# Modo archivo local (.casata)
+# ----------------------------
+if [ $FILE_MODE -eq 1 ]; then
+    FAILED=()
+    for FILE in "${PACKAGES[@]}"; do
+        echo -e "\n${GREEN}========================================${NC}"
+        echo -e "${GREEN}Instalando desde archivo: $FILE${NC}"
+        echo -e "${GREEN}========================================${NC}"
+        if install_from_file "$FILE" "$AUTO_YES" "$DOWNLOAD_ONLY"; then
+            echo -e "${GREEN}✔ $FILE instalado correctamente.${NC}"
+        else
+            echo -e "${RED}✖ Falló la instalación de $FILE.${NC}"
+            FAILED+=("$FILE")
+        fi
+    done
+
+    echo -e "\n${GREEN}════════════════════════════════════════${NC}"
+    if [ ${#FAILED[@]} -eq 0 ]; then
+        echo -e "${GREEN}✓ Todos los archivos se instalaron correctamente.${NC}"
+    else
+        echo -e "${RED}✖ Los siguientes archivos fallaron: ${FAILED[*]}${NC}"
+    fi
+    echo -e "${GREEN}════════════════════════════════════════${NC}"
+
+    if [ ${#FAILED[@]} -gt 0 ]; then
+        exit 1
+    fi
+    exit 0
+fi
+
+# ----------------------------
+# Modo repositorio (paquetes normales)
+# ----------------------------
 if [ ${#PACKAGES[@]} -gt 1 ]; then
     echo -e "\n${YELLOW}Resolviendo dependencias de todos los paquetes solicitados...${NC}"
 
@@ -799,7 +987,6 @@ if [ ${#PACKAGES[@]} -gt 1 ]; then
         collect_package_deps "$PKG"
     done
 
-    # ---------- Dependencias del sistema (una sola vez) ----------
     ALL_SYSTEM_DEPS=""
     case "$PKG_MANAGER" in
         apt)    ALL_SYSTEM_DEPS="${!COLLECTED_APT[*]}" ;;
@@ -822,7 +1009,6 @@ if [ ${#PACKAGES[@]} -gt 1 ]; then
         fi
     fi
 
-    # ---------- Dependencias Python (una sola vez) ----------
     ALL_PIP_DEPS=""
     if [ ${#COLLECTED_PIP[@]} -gt 0 ]; then
         ALL_PIP_DEPS=$(printf '%s\n' "${!COLLECTED_PIP[@]}")
@@ -843,11 +1029,9 @@ if [ ${#PACKAGES[@]} -gt 1 ]; then
         fi
     fi
 
-    # ---------- Construir orden final de instalación ----------
     declare -a INSTALL_ORDER=()
     declare -A ADDED_PKGS=()
 
-    # Primero las dependencias Casata en orden topológico
     for dep in "${CASATA_ORDER[@]}"; do
         if [ -z "${ADDED_PKGS[$dep]:-}" ]; then
             INSTALL_ORDER+=("$dep")
@@ -855,7 +1039,6 @@ if [ ${#PACKAGES[@]} -gt 1 ]; then
         fi
     done
 
-    # Después los paquetes pedidos por el usuario
     for pkg in "${PACKAGES[@]}"; do
         if [ -z "${ADDED_PKGS[$pkg]:-}" ]; then
             INSTALL_ORDER+=("$pkg")
@@ -863,7 +1046,6 @@ if [ ${#PACKAGES[@]} -gt 1 ]; then
         fi
     done
 
-    # ---------- Instalar sin volver a procesar dependencias ----------
     SKIP_SYSTEM_DEPS=1
     SKIP_PIP_DEPS=1
     SKIP_CASATA_DEPS=1
@@ -896,9 +1078,9 @@ if [ ${#PACKAGES[@]} -gt 1 ]; then
     exit 0
 fi
 
-# ============================================================
-# MODO PAQUETE ÚNICO (comportamiento original)
-# ============================================================
+# ----------------------------
+# Modo paquete único
+# ----------------------------
 FAILED=()
 for PKG in "${PACKAGES[@]}"; do
     echo -e "\n${GREEN}========================================${NC}"
