@@ -2,11 +2,10 @@
 
 # /usr/local/casata/modules/update.sh
 # Copyright (C) 2026, GPL v3+, Lynds Corp., Aros Legendarios, David Baña Szymaniak
-# Script de actualización de repositorios de Casata (versión 1.3.4.1)
+# Script de actualización de repositorios de Casata (versión 1.3.4.2)
 
 # Novedades:
-#   - Permite actualizar varios metarepos: casata update repo1 repo2 ...
-#   - Respeta el orden de PRIORITY entre los metarepos solicitados.
+#   - Valida que los nombres no contengan '/' (evita path traversal).
 
 shopt -s nullglob
 set -euo pipefail
@@ -66,16 +65,25 @@ if [ ${#METAREPO_FILES[@]} -eq 0 ]; then
     exit 0
 fi
 
+# --- Función de validación de nombre de metarepo ---
+valid_metarepo_name() {
+    local name="$1"
+    [[ "$name" != */* ]] && [[ -n "$name" ]]
+}
+
 # --- Función para resolver un nombre de metarepo a su archivo ---
 resolver_metarepo() {
     local name="$1"
     local file=""
+
+    if ! valid_metarepo_name "$name"; then
+        return 1
+    fi
+
     if [ -f "$METAREPOS_DIR/$name" ]; then
         file="$METAREPOS_DIR/$name"
     elif [ -f "$METAREPOS_DIR/$name.json" ]; then
         file="$METAREPOS_DIR/$name.json"
-    elif [ -f "$name" ]; then
-        file="$name"
     else
         return 1
     fi
@@ -89,6 +97,12 @@ if [ -f "$PRIORITY_FILE" ]; then
         line=$(echo "$line" | sed 's/#.*//; s/^[[:space:]]*//; s/[[:space:]]*$//')
         [ -z "$line" ] && continue
 
+        # Solo nombres simples, sin rutas
+        if ! valid_metarepo_name "$line"; then
+            echo -e "${YELLOW}Advertencia: entrada inválida en PRIORITY ignorada: '$line'${NC}"
+            continue
+        fi
+
         if [ -f "$METAREPOS_DIR/$line" ]; then
             PRIORITY_FILES+=("$METAREPOS_DIR/$line")
         elif [ -f "$METAREPOS_DIR/$line.json" ]; then
@@ -101,8 +115,13 @@ fi
 declare -a REQUESTED_FILES=()
 if [ ${#TARGET_METAREPOS[@]} -gt 0 ]; then
     for repo in "${TARGET_METAREPOS[@]}"; do
+        if ! valid_metarepo_name "$repo"; then
+            echo -e "${RED}Nombre de metarepo inválido: '$repo'. No se permiten rutas (nombres con '/').${NC}"
+            exit 1
+        fi
+
         resolved=$(resolver_metarepo "$repo") || {
-            echo -e "${RED}No se encontró el metarepo '$repo' en $METAREPOS_DIR.${NC}"
+            echo -e "${RED}No se encontró el metarepo '$repo' en los metarepos añadidos.${NC}"
             exit 1
         }
 
