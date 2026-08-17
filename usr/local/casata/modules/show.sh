@@ -140,7 +140,7 @@ show_app_info() {
     if [ -f "$meta_file" ]; then
         echo -e "  ${YELLOW}Metadatos del repositorio:${NC}"
         local project=$(jq -r '.project // ""' "$meta_file" 2>/dev/null)
-        local is_open=$(jq -r '.is_open_sorce // ""' "$meta_file" 2>/dev/null)
+        local is_open=$(jq -r '.is_open_source // ""' "$meta_file" 2>/dev/null)
         local source_code=$(jq -r '.source_code // ""' "$meta_file" 2>/dev/null)
         local license=$(jq -r '.license // ""' "$meta_file" 2>/dev/null)
         local origin=$(jq -r '.origin // ""' "$meta_file" 2>/dev/null)
