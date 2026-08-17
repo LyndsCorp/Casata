@@ -99,8 +99,8 @@ DEPS=$(jq -r '.dependencies // [] | join(", ")' "$DB_FILE")
 [ -z "$DEPS" ] && DEPS="Ninguna"
 
 # ---- Nuevos campos de metadatos ----
-PROJECT=$(jq -r '.project // ""' "$DB_FILE")              # nuevo campo
-IS_OPEN=$(jq -r '.is_open_sorce // false' "$DB_FILE")
+PROJECT=$(jq -r '.project // ""' "$DB_FILE")
+IS_OPEN=$(jq -r '.is_open_source // false' "$DB_FILE")
 SOURCE_CODE=$(jq -r '.source_code // ""' "$DB_FILE")
 ORIGIN=$(jq -r '.origin // ""' "$DB_FILE")
 DEVELOPER=$(jq -r '.developer // ""' "$DB_FILE")
