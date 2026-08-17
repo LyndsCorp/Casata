@@ -906,6 +906,17 @@ install_one() {
     ARCHIVE_PATH="$APP_DIR/$ARCHIVE_NAME"
     EXTRACT_DIR=$(mktemp -d)
 
+    # --- NUEVO: confirmación antes de descargar ---
+    if [ "$AUTO_YES" -eq 0 ]; then
+        echo -e "${YELLOW}Se descargará e instalará $PKG_NAME (versión $REPO_VERSION).${NC}"
+        read -p "¿Deseas continuar? [S/n] " resp < /dev/tty
+        if [[ ! "$resp" =~ ^[SsYy]?$ ]]; then
+            echo -e "${YELLOW}Instalación cancelada.${NC}"
+            return 2
+        fi
+    fi
+    # ----------------------------------------------
+
     echo -e "${GREEN}Descargando $PKG_NAME...${NC}"
     wget -q --show-progress -O "$ARCHIVE_PATH" "$DOWNLOAD_URL" || { echo -e "${RED}Error descarga.${NC}"; return 1; }
 
@@ -1160,6 +1171,18 @@ install_from_file() {
     # Modo external_metadata: descargar release oficial
     # ----------------------------------------------
     if [ $EXTERNAL_MODE -eq 1 ]; then
+        # --- NUEVO: confirmación antes de descargar el release oficial ---
+        if [ "$AUTO_YES" -eq 0 ]; then
+            echo -e "${YELLOW}Se descargará el release oficial desde $RELEASE_URL.${NC}"
+            read -p "¿Deseas continuar? [S/n] " resp < /dev/tty
+            if [[ ! "$resp" =~ ^[SsYy]?$ ]]; then
+                echo -e "${YELLOW}Instalación cancelada.${NC}"
+                rm -rf "$EXTRACT_DIR"
+                return 2
+            fi
+        fi
+        # ------------------------------------------------------------------
+
         echo -e "${GREEN}Descargando release oficial desde $RELEASE_URL...${NC}"
         local release_tmp=$(mktemp -d)
         local archive_name=$(basename "$RELEASE_URL" | cut -d '?' -f1)
