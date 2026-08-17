@@ -5,6 +5,39 @@ CASATA_ROOT="/usr/local/casata"
 APPS_DIR="$CASATA_ROOT/apps"
 DATA_DIR="$CASATA_ROOT/data"
 
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+# ------------------------------------------------------------
+# Función para resolver versiones que pueden ser URLs
+# Solo se aplica al campo "version" de los metadatos JSON
+# ------------------------------------------------------------
+resolve_version() {
+    local version_input="$1"
+    if [[ "$version_input" =~ ^[Hh][Tt][Tt][Pp] ]]; then
+        local temp_file=$(mktemp)
+        if wget -q --timeout=10 --tries=1 -O "$temp_file" "$version_input" 2>/dev/null; then
+            local resolved=$(cat "$temp_file" | tr -d '[:space:]')
+            rm -f "$temp_file"
+            if [ -n "$resolved" ]; then
+                echo "$resolved"
+            else
+                rm -f "$temp_file"
+                echo -e "${RED}Error: La URL de versión devolvió contenido vacío.${NC}" >&2
+                return 1
+            fi
+        else
+            rm -f "$temp_file"
+            echo -e "${RED}Error: No se pudo descargar la versión desde $version_input.${NC}" >&2
+            return 1
+        fi
+    else
+        echo "$version_input"
+    fi
+}
+
 # Parsear argumentos
 FLAG=""
 PKG_NAME=""
@@ -36,7 +69,7 @@ if [ -n "$FLAG" ]; then
         echo -e "${RED}El paquete no está instalado. No se puede leer el archivo local.${NC}"
         exit 1
     fi
-    
+
     if [ "$FLAG" == "license" ] && [ -f "$APP_DIR/LICENSE" ]; then
         echo -e "${YELLOW}=== LICENCIA de $PKG_NAME ===${NC}"
         cat "$APP_DIR/LICENSE"
@@ -56,7 +89,13 @@ NAME=$(jq -r '.name' "$DB_FILE")
 DESC=$(jq -r '.description // "No disponible"' "$DB_FILE")
 SIZE=$(jq -r '.size // "Desconocido"' "$DB_FILE")
 USAGE=$(jq -r '.usage // "No especificado"' "$DB_FILE")
+
+# Versión de repositorio (puede ser URL)
 DB_VERSION=$(jq -r '.version // "Desconocida"' "$DB_FILE")
+if ! DB_VERSION=$(resolve_version "$DB_VERSION"); then
+    DB_VERSION="Desconocida"
+fi
+
 DEPS=$(jq -r '.dependencies // [] | join(", ")' "$DB_FILE")
 [ -z "$DEPS" ] && DEPS="Ninguna"
 
@@ -66,13 +105,13 @@ INSTALLED_VERSION="-"
 
 if [ -d "$APP_DIR" ]; then
     if [ -f "$APP_DIR/VERSION" ]; then
+        # Versión instalada: se lee directamente del archivo VERSION (nunca es URL)
         INSTALLED_VERSION=$(cat "$APP_DIR/VERSION")
-        
+
         # Comparación de versiones
         if [ "$INSTALLED_VERSION" == "$DB_VERSION" ]; then
             STATUS_STR="${GREEN}Instalado (Actualizado)${NC}"
         else
-            # sort -V ordena correctamente versiones (ej. 1.9 vs 1.10)
             OLDER=$(printf '%s\n' "$INSTALLED_VERSION" "$DB_VERSION" | sort -V | head -n1)
             if [ "$OLDER" == "$INSTALLED_VERSION" ]; then
                 STATUS_STR="${YELLOW}Instalado (Actualización disponible a $DB_VERSION)${NC}"

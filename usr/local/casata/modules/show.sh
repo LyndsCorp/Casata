@@ -31,6 +31,7 @@ show_app_info() {
 
     # Versión
     if [ -f "$app_dir/VERSION" ]; then
+        # Versión instalada: se lee directamente (nunca es URL)
         version=$(cat "$app_dir/VERSION")
         echo -e "  ${YELLOW}Versión:${NC} $version"
     else
@@ -41,18 +42,15 @@ show_app_info() {
     local guide_file="$app_dir/GUIDE.json"
     if [ -f "$guide_file" ]; then
         echo -e "  ${YELLOW}Enlaces simbólicos:${NC}"
-        # Extraer cada enlace: dest y name
         jq -c '.links[]' "$guide_file" 2>/dev/null | while read -r item; do
             dest=$(echo "$item" | jq -r '.dest // ""')
             name=$(echo "$item" | jq -r '.name // ""')
             if [ -n "$dest" ] && [ -n "$name" ]; then
-                # Expandir ~ y $HOME en dest
                 dest_expanded="${dest/#\~/$HOME}"
                 dest_expanded="${dest_expanded//\$HOME/$HOME}"
                 echo -e "    → $name ${GREEN}->${NC} $dest_expanded"
             fi
         done
-        # Si no hay enlaces, no mostrar nada
     else
         echo -e "  ${YELLOW}Enlaces simbólicos:${NC} (no definidos)"
     fi

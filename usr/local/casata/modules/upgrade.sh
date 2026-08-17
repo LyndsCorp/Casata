@@ -16,6 +16,34 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+# ------------------------------------------------------------
+# Función para resolver versiones que pueden ser URLs
+# Solo se aplica al campo "version" de los metadatos JSON
+# ------------------------------------------------------------
+resolve_version() {
+    local version_input="$1"
+    if [[ "$version_input" =~ ^[Hh][Tt][Tt][Pp] ]]; then
+        local temp_file=$(mktemp)
+        if wget -q --timeout=10 --tries=1 -O "$temp_file" "$version_input" 2>/dev/null; then
+            local resolved=$(cat "$temp_file" | tr -d '[:space:]')
+            rm -f "$temp_file"
+            if [ -n "$resolved" ]; then
+                echo "$resolved"
+            else
+                rm -f "$temp_file"
+                echo -e "${RED}Error: La URL de versión devolvió contenido vacío.${NC}" >&2
+                return 1
+            fi
+        else
+            rm -f "$temp_file"
+            echo -e "${RED}Error: No se pudo descargar la versión desde $version_input.${NC}" >&2
+            return 1
+        fi
+    else
+        echo "$version_input"
+    fi
+}
+
 # Procesar argumentos
 AUTO_YES=0
 
@@ -37,6 +65,7 @@ if [ -d "$DIR" ]; then
         pkg_name=$(basename "$app_dir")
         version_file="$app_dir/VERSION"
         if [ -f "$version_file" ]; then
+            # Versión instalada: se lee directamente (nunca es URL)
             installed_version=$(cat "$version_file")
         else
             installed_version="desconocida"
@@ -57,6 +86,10 @@ for entry in "${INSTALLED_LIST[@]}"; do
     repo_file="$DATA_DIR/${pkg}.json"
     if [ -f "$repo_file" ]; then
         repo_version=$(jq -r '.version // "0.0.0"' "$repo_file" 2>/dev/null)
+        # El campo version de metadatos puede ser URL, resolver
+        if ! repo_version=$(resolve_version "$repo_version"); then
+            repo_version=""
+        fi
         [ -z "$repo_version" ] || [ "$repo_version" = "null" ] && repo_version="0.0.0"
         REPO_VERSIONS["$pkg"]="$repo_version"
     else

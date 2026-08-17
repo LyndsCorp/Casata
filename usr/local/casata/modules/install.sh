@@ -21,15 +21,14 @@ SKIP_SYSTEM_DEPS=0
 SKIP_PIP_DEPS=0
 SKIP_CASATA_DEPS=0
 
-# Arrays asociativos para recopilar dependencias de todos los paquetes
 declare -A COLLECTED_APT=()
 declare -A COLLECTED_PACMAN=()
 declare -A COLLECTED_DNF=()
 declare -A COLLECTED_PIP=()
 declare -A COLLECTED_CASATA=()
 declare -A VISITED_PACKAGES=()
-declare -A IN_STACK=()          # Para detección de ciclos
-declare -a CASATA_ORDER=()      # Orden topológico de dependencias Casata
+declare -A IN_STACK=()
+declare -a CASATA_ORDER=()
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -37,16 +36,41 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 # ------------------------------------------------------------
+# Función para resolver versiones que pueden ser URLs
+# Solo se aplica al campo "version" de los metadatos JSON
+# ------------------------------------------------------------
+resolve_version() {
+    local version_input="$1"
+    if [[ "$version_input" =~ ^[Hh][Tt][Tt][Pp] ]]; then
+        local temp_file=$(mktemp)
+        if wget -q --timeout=10 --tries=1 -O "$temp_file" "$version_input" 2>/dev/null; then
+            local resolved=$(cat "$temp_file" | tr -d '[:space:]')
+            rm -f "$temp_file"
+            if [ -n "$resolved" ]; then
+                echo "$resolved"
+            else
+                rm -f "$temp_file"
+                echo -e "${RED}Error: La URL de versión devolvió contenido vacío.${NC}" >&2
+                return 1
+            fi
+        else
+            rm -f "$temp_file"
+            echo -e "${RED}Error: No se pudo descargar la versión desde $version_input.${NC}" >&2
+            return 1
+        fi
+    else
+        echo "$version_input"
+    fi
+}
+
+# ------------------------------------------------------------
 # Estado del gestor de paquetes
 # ------------------------------------------------------------
-PKG_MANAGER=""            # apt, pacman o dnf
-PM_UPDATE_DONE=0          # 0=no hecho, 1=hecho OK, 2=falló
+PKG_MANAGER=""
+PM_UPDATE_DONE=0
 
 # ------------------------------------------------------------
 # Directorios y archivos protegidos
-# Se leen desde /usr/local/casata/SAVE_FILES.txt
-#   - Carpetas terminan en /
-#   - Archivos no llevan / final
 # ------------------------------------------------------------
 SAVE_FILES_FILE="$GLOBAL_ROOT/SAVE_FILES.txt"
 PROTECTED_DIRS=()
@@ -181,14 +205,12 @@ split_to_array() {
 # ------------------------------------------------------------
 normalize_pkg_name() {
     local name="$1"
-    # Eliminar extensiones de archivo conocidas
     name="${name%.casata}"
     name="${name%.tar.gz}"
     name="${name%.tgz}"
     name="${name%.tar.xz}"
     name="${name%.zip}"
     name="${name%.tar}"
-    # Convertir a minúsculas
     name="${name,,}"
     echo "$name"
 }
@@ -207,7 +229,7 @@ is_valid_package_file() {
 # Instalación de dependencias del sistema (usando arrays)
 # ------------------------------------------------------------
 install_system_deps() {
-    local -n deps_array="$1"   # Referencia a array
+    local -n deps_array="$1"
     [ ${#deps_array[@]} -eq 0 ] && return 0
 
     echo -e "${YELLOW}Intentando instalar dependencias del sistema ($PKG_MANAGER): ${deps_array[*]}${NC}"
@@ -236,14 +258,12 @@ install_system_deps() {
                 fi
                 ;;
             pacman)
-                # Intento inicial sin -Sy
                 if [ "${AUTO_YES:-0}" -eq 1 ]; then
                     pacman -S --needed --noconfirm "${deps_array[@]}" && return 0
                 else
                     pacman -S --needed "${deps_array[@]}" && return 0
                 fi
 
-                # Fallo: no intentar -Sy automáticamente
                 echo -e "${YELLOW}No se encontraron los paquetes. Es posible que necesites actualizar tu sistema con 'pacman -Syu'.${NC}"
                 echo -e "${YELLOW}Casata no ejecutará 'pacman -Sy' para evitar actualizaciones parciales.${NC}"
                 if [ "${AUTO_YES:-0}" -eq 1 ]; then
@@ -372,7 +392,6 @@ install_casata_deps() {
     for pkg in "${casata_array[@]}"; do
         [ -z "$pkg" ] && continue
 
-        # Normalizar nombre del paquete (quitar extensiones y minúsculas)
         local normalized_pkg
         normalized_pkg=$(normalize_pkg_name "$pkg")
         [ -z "$normalized_pkg" ] && continue
@@ -404,7 +423,6 @@ install_casata_deps() {
 # ------------------------------------------------------------
 collect_package_deps() {
     local pkg="$1"
-    # Normalizar nombre del paquete
     pkg=$(normalize_pkg_name "$pkg")
 
     if [ "${IN_STACK[$pkg]:-0}" -eq 1 ]; then
@@ -416,7 +434,6 @@ collect_package_deps() {
         return 0
     fi
 
-    # Comprobar que existe metadata ANTES de marcarlo como visitado
     local pkg_file="$DATA_DIR/${pkg}.json"
     if [ ! -f "$pkg_file" ]; then
         echo -e "${RED}Error: Dependencia '$pkg' no encontrada en la base de datos local. Ejecute 'casata update'.${NC}" >&2
@@ -428,7 +445,6 @@ collect_package_deps() {
 
     local dep
 
-    # Dependencias del sistema
     while IFS= read -r dep; do
         [ -n "$dep" ] && COLLECTED_APT["$dep"]=1
     done < <(jq -r '.apt? // [] | .[]' "$pkg_file" 2>/dev/null || true)
@@ -441,16 +457,13 @@ collect_package_deps() {
         [ -n "$dep" ] && COLLECTED_DNF["$dep"]=1
     done < <(jq -r '.dnf? // [] | .[]' "$pkg_file" 2>/dev/null || true)
 
-    # Dependencias Python
     while IFS= read -r dep; do
         [ -n "$dep" ] && COLLECTED_PIP["$dep"]=1
     done < <(jq -r '.pip? // [] | .[]' "$pkg_file" 2>/dev/null || true)
 
-    # Dependencias Casata (recursivas, con detección de ciclos)
     while IFS= read -r dep; do
         [ -n "$dep" ] || continue
 
-        # Normalizar dependencia
         dep=$(normalize_pkg_name "$dep")
 
         if [ "${IN_STACK[$dep]:-0}" -eq 1 ]; then
@@ -501,7 +514,6 @@ ask_overwrite() {
     local auto_yes="$3"
 
     if [ "$auto_yes" -eq 1 ]; then
-        # Solo eliminar archivos o enlaces, nunca directorios
         if [ -L "$target" ] || [ -f "$target" ]; then
             rm -f -- "$target"
             return 0
@@ -540,7 +552,6 @@ extract_archive() {
     local base_name
 
     base_name=$(basename "$archive_path")
-    # Si termina en .casata, quitamos esa extensión para detectar el formato interno
     if [[ "$base_name" == *.casata ]]; then
         base_name="${base_name%.casata}"
     fi
@@ -682,7 +693,7 @@ version_check() {
     local repo_version="$3"
     local auto_yes="$4"
 
-    # Si repo_version está vacío, asumir 0.0.0
+    # repo_version ya viene resuelta (si era URL, ya se descargó)
     if [ -z "$repo_version" ]; then
         echo -e "${YELLOW}Advertencia: No se pudo determinar la versión del paquete. Se asume 0.0.0.${NC}"
         repo_version="0.0.0"
@@ -691,6 +702,7 @@ version_check() {
     if [ -d "$app_dir" ]; then
         if [ -f "$app_dir/VERSION" ]; then
             local installed_version
+            # Versión instalada: se lee directamente del archivo VERSION (nunca es URL)
             installed_version=$(cat "$app_dir/VERSION" 2>/dev/null || echo "0.0.0")
             echo -e "${YELLOW}Versión instalada: $installed_version${NC}"
             echo -e "${YELLOW}Versión del paquete: $repo_version${NC}"
@@ -749,7 +761,12 @@ install_one() {
     fi
 
     REPO_VERSION=$(jq -r '.version // "0.0.0"' "$PKG_FILE")
-    SHA256=$(jq -r '.sha256 // empty' "$PKG_FILE")   # Opcional
+    # El campo version de metadatos puede ser URL, resolver
+    if ! REPO_VERSION=$(resolve_version "$REPO_VERSION"); then
+        REPO_VERSION="0.0.0"
+        echo -e "${YELLOW}No se pudo resolver la versión del repositorio; se asume 0.0.0.${NC}"
+    fi
+    SHA256=$(jq -r '.sha256 // empty' "$PKG_FILE")
 
     # Leer dependencias en arrays
     local -a APT_DEPS=() PACMAN_DEPS=() DNF_DEPS=() PIP_DEPS=() CASATA_DEPS=()
@@ -763,7 +780,7 @@ install_one() {
     # Version check ANTES de dependencias
     # ---------------------------
     if ! version_check "$APP_DIR" "$PKG_NAME" "$REPO_VERSION" "$AUTO_YES"; then
-        return 2  # Omitido por usuario
+        return 2
     fi
 
     # ---------------------------
@@ -837,7 +854,6 @@ install_one() {
     echo -e "${GREEN}Descargando $PKG_NAME...${NC}"
     wget -q --show-progress -O "$ARCHIVE_PATH" "$DOWNLOAD_URL" || { echo -e "${RED}Error descarga.${NC}"; return 1; }
 
-    # Verificar SHA256 si está definido
     if [ -n "$SHA256" ]; then
         echo -e "${YELLOW}Verificando integridad del archivo...${NC}"
         echo "$SHA256  $ARCHIVE_PATH" | sha256sum -c - >/dev/null 2>&1 || {
@@ -850,7 +866,6 @@ install_one() {
 
     extract_archive "$ARCHIVE_PATH" "$EXTRACT_DIR" || { rm -rf "$EXTRACT_DIR"; return 1; }
 
-    # Mover contenido con dotglob para incluir ocultos
     (
         shopt -s dotglob nullglob
         files=("$SRC_DIR"/*)
@@ -882,7 +897,6 @@ install_from_file() {
         return 1
     fi
 
-    # Validar extensión
     if ! is_valid_package_file "$ARCHIVE_FILE"; then
         echo -e "${RED}Error: '$ARCHIVE_FILE' no es un paquete Casata válido (formatos: .casata, .zip, .tar.gz, .tgz, .tar.xz, .tar).${NC}"
         return 1
@@ -904,7 +918,6 @@ install_from_file() {
         return 1
     fi
 
-    # --- Metadatos: prioridad DATA.json -> base de datos global -> VERSION/DEPS.json ---
     local DATA_FILE="$SRC_DIR/DATA.json"
     local VERSION_FILE="$SRC_DIR/VERSION"
     local DEPS_FILE="$SRC_DIR/DEPS.json"
@@ -916,6 +929,11 @@ install_from_file() {
     if [ -f "$DATA_FILE" ]; then
         echo -e "${YELLOW}Se encontró DATA.json, usando metadatos del paquete.${NC}"
         REPO_VERSION=$(jq -r '.version // "0.0.0"' "$DATA_FILE" 2>/dev/null || true)
+        # El campo version de DATA.json (metadatos) puede ser URL, resolver
+        if ! REPO_VERSION=$(resolve_version "$REPO_VERSION"); then
+            REPO_VERSION="0.0.0"
+            echo -e "${YELLOW}No se pudo resolver la versión del paquete; se asume 0.0.0.${NC}"
+        fi
         SHA256=$(jq -r '.sha256 // empty' "$DATA_FILE" 2>/dev/null || true)
         split_to_array APT_DEPS "$(jq -r '.apt? // [] | .[]' "$DATA_FILE" 2>/dev/null || true)" || true
         split_to_array PACMAN_DEPS "$(jq -r '.pacman? // [] | .[]' "$DATA_FILE" 2>/dev/null || true)" || true
@@ -923,13 +941,16 @@ install_from_file() {
         split_to_array PIP_DEPS "$(jq -r '.pip? // [] | .[]' "$DATA_FILE" 2>/dev/null || true)" || true
         split_to_array CASATA_DEPS "$(jq -r '.casata? // [] | .[]' "$DATA_FILE" 2>/dev/null || true)" || true
     else
-        # Buscar en base de datos global usando nombre normalizado en minúsculas
         local global_json="$DATA_DIR/${PKG_NAME}.json"
         if [ -f "$global_json" ]; then
-            # Verificar que el JSON sea válido antes de extraer
             if jq empty "$global_json" 2>/dev/null; then
                 echo -e "${YELLOW}No se encontró DATA.json. Usando metadatos de la base de datos global para '$PKG_NAME'.${NC}"
                 REPO_VERSION=$(jq -r '.version // "0.0.0"' "$global_json" 2>/dev/null || true)
+                # El campo version de metadatos globales puede ser URL, resolver
+                if ! REPO_VERSION=$(resolve_version "$REPO_VERSION"); then
+                    REPO_VERSION="0.0.0"
+                    echo -e "${YELLOW}No se pudo resolver la versión global; se asume 0.0.0.${NC}"
+                fi
                 SHA256=$(jq -r '.sha256 // empty' "$global_json" 2>/dev/null || true)
                 split_to_array APT_DEPS "$(jq -r '.apt? // [] | .[]' "$global_json" 2>/dev/null || true)" || true
                 split_to_array PACMAN_DEPS "$(jq -r '.pacman? // [] | .[]' "$global_json" 2>/dev/null || true)" || true
@@ -939,6 +960,7 @@ install_from_file() {
             else
                 echo -e "${YELLOW}Advertencia: El archivo de base de datos global '$global_json' no es un JSON válido. Intentando con VERSION...${NC}"
                 if [ -f "$VERSION_FILE" ]; then
+                    # El archivo VERSION local nunca es URL, se lee directamente
                     REPO_VERSION=$(cat "$VERSION_FILE" 2>/dev/null || true)
                     if [ -f "$DEPS_FILE" ]; then
                         echo -e "${YELLOW}Se encontró DEPS.json, procesando dependencias...${NC}"
@@ -956,6 +978,7 @@ install_from_file() {
             fi
         elif [ -f "$VERSION_FILE" ]; then
             echo -e "${YELLOW}No se encontró DATA.json ni base de datos global. Usando archivo VERSION y DEPS.json si existe.${NC}"
+            # El archivo VERSION local nunca es URL, se lee directamente
             REPO_VERSION=$(cat "$VERSION_FILE" 2>/dev/null || true)
             if [ -f "$DEPS_FILE" ]; then
                 echo -e "${YELLOW}Se encontró DEPS.json, procesando dependencias...${NC}"
@@ -975,10 +998,10 @@ install_from_file() {
     # Version check antes de dependencias
     if ! version_check "$APP_DIR" "$PKG_NAME" "$REPO_VERSION" "$AUTO_YES"; then
         rm -rf "$EXTRACT_DIR"
-        return 2  # Omitido por usuario
+        return 2
     fi
 
-    # Instalar dependencias (con preguntas si no -y)
+    # Instalar dependencias
     if [ "${SKIP_SYSTEM_DEPS:-0}" -eq 0 ]; then
         local -a SYSTEM_DEPS=()
         case "$PKG_MANAGER" in
@@ -1091,7 +1114,7 @@ if [ ${#PACKAGES[@]} -eq 0 ]; then
     exit 1
 fi
 
-# Auto-detectar archivos locales (solo extensiones válidas)
+# Auto-detectar archivos locales
 if [ $FILE_MODE -eq 0 ]; then
     all_files=1
     for pkg in "${PACKAGES[@]}"; do
@@ -1106,7 +1129,7 @@ if [ $FILE_MODE -eq 0 ]; then
     fi
 fi
 
-# Redirigir actualización de Casata si es el único paquete y no es modo archivo
+# Redirigir actualización de Casata
 if [ $FILE_MODE -eq 0 ] && [ ${#PACKAGES[@]} -eq 1 ] && [ "${PACKAGES[0]}" == "casata" ]; then
     echo -e "${GREEN}Redirigiendo a la actualización de Casata...${NC}"
     exec "$GLOBAL_ROOT/modules/install-casata.sh" "${ORIGINAL_ARGS[@]}"
@@ -1114,7 +1137,7 @@ if [ $FILE_MODE -eq 0 ] && [ ${#PACKAGES[@]} -eq 1 ] && [ "${PACKAGES[0]}" == "c
     exit 1
 fi
 
-# Cargar rutas protegidas desde SAVE_FILES.txt
+# Cargar rutas protegidas
 load_protected_paths
 
 init_package_manager
