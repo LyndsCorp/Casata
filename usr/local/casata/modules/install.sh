@@ -177,6 +177,33 @@ split_to_array() {
 }
 
 # ------------------------------------------------------------
+# Normalizar nombre de paquete
+# ------------------------------------------------------------
+normalize_pkg_name() {
+    local name="$1"
+    # Eliminar extensiones de archivo conocidas
+    name="${name%.casata}"
+    name="${name%.tar.gz}"
+    name="${name%.tgz}"
+    name="${name%.tar.xz}"
+    name="${name%.zip}"
+    name="${name%.tar}"
+    # Convertir a minúsculas
+    name="${name,,}"
+    echo "$name"
+}
+
+# ------------------------------------------------------------
+# Comprobar si un archivo tiene extensión de paquete válida
+# ------------------------------------------------------------
+is_valid_package_file() {
+    local file="$1"
+    local base
+    base=$(basename "$file")
+    [[ "$base" == *.casata || "$base" == *.zip || "$base" == *.tar.gz || "$base" == *.tgz || "$base" == *.tar.xz || "$base" == *.tar ]]
+}
+
+# ------------------------------------------------------------
 # Instalación de dependencias del sistema (usando arrays)
 # ------------------------------------------------------------
 install_system_deps() {
@@ -345,21 +372,26 @@ install_casata_deps() {
     for pkg in "${casata_array[@]}"; do
         [ -z "$pkg" ] && continue
 
-        if grep -qxF "$pkg" "$CASATA_DEP_CACHE"; then
-            echo -e "${YELLOW}→ Dependencia Casata '$pkg' ya fue procesada, omitiendo.${NC}"
+        # Normalizar nombre del paquete (quitar extensiones y minúsculas)
+        local normalized_pkg
+        normalized_pkg=$(normalize_pkg_name "$pkg")
+        [ -z "$normalized_pkg" ] && continue
+
+        if grep -qxF "$normalized_pkg" "$CASATA_DEP_CACHE"; then
+            echo -e "${YELLOW}→ Dependencia Casata '$normalized_pkg' ya fue procesada, omitiendo.${NC}"
             continue
         fi
 
-        echo "$pkg" >> "$CASATA_DEP_CACHE"
+        echo "$normalized_pkg" >> "$CASATA_DEP_CACHE"
 
-        echo -e "${YELLOW}→ Instalando dependencia Casata: $pkg${NC}"
+        echo -e "${YELLOW}→ Instalando dependencia Casata: $normalized_pkg${NC}"
 
         if [ "$auto_yes" -eq 1 ]; then
-            "$GLOBAL_ROOT/modules/install.sh" -y "$pkg"
+            "$GLOBAL_ROOT/modules/install.sh" -y "$normalized_pkg"
         else
-            "$GLOBAL_ROOT/modules/install.sh" "$pkg"
+            "$GLOBAL_ROOT/modules/install.sh" "$normalized_pkg"
         fi || {
-            echo -e "${RED}Error al instalar la dependencia Casata '$pkg'.${NC}"
+            echo -e "${RED}Error al instalar la dependencia Casata '$normalized_pkg'.${NC}"
             return 1
         }
     done
@@ -372,6 +404,8 @@ install_casata_deps() {
 # ------------------------------------------------------------
 collect_package_deps() {
     local pkg="$1"
+    # Normalizar nombre del paquete
+    pkg=$(normalize_pkg_name "$pkg")
 
     if [ "${IN_STACK[$pkg]:-0}" -eq 1 ]; then
         echo -e "${RED}Error: Ciclo de dependencias detectado en '$pkg'.${NC}" >&2
@@ -415,6 +449,9 @@ collect_package_deps() {
     # Dependencias Casata (recursivas, con detección de ciclos)
     while IFS= read -r dep; do
         [ -n "$dep" ] || continue
+
+        # Normalizar dependencia
+        dep=$(normalize_pkg_name "$dep")
 
         if [ "${IN_STACK[$dep]:-0}" -eq 1 ]; then
             echo -e "${RED}Error: Ciclo de dependencias detectado: '$pkg' -> '$dep'.${NC}" >&2
@@ -500,8 +537,15 @@ ask_overwrite() {
 extract_archive() {
     local archive_path="$1"
     local extract_dir="$2"
+    local base_name
 
-    case "$(basename "$archive_path")" in
+    base_name=$(basename "$archive_path")
+    # Si termina en .casata, quitamos esa extensión para detectar el formato interno
+    if [[ "$base_name" == *.casata ]]; then
+        base_name="${base_name%.casata}"
+    fi
+
+    case "$base_name" in
         *.zip) unzip -q "$archive_path" -d "$extract_dir" ;;
         *.tar.gz|*.tgz) tar -xzf "$archive_path" -C "$extract_dir" ;;
         *.tar.xz) tar -xJf "$archive_path" -C "$extract_dir" ;;
@@ -638,18 +682,23 @@ version_check() {
     local repo_version="$3"
     local auto_yes="$4"
 
+    # Si repo_version está vacío, asumir 0.0.0
+    if [ -z "$repo_version" ]; then
+        echo -e "${YELLOW}Advertencia: No se pudo determinar la versión del paquete. Se asume 0.0.0.${NC}"
+        repo_version="0.0.0"
+    fi
+
     if [ -d "$app_dir" ]; then
         if [ -f "$app_dir/VERSION" ]; then
             local installed_version
-            installed_version=$(cat "$app_dir/VERSION")
+            installed_version=$(cat "$app_dir/VERSION" 2>/dev/null || echo "0.0.0")
             echo -e "${YELLOW}Versión instalada: $installed_version${NC}"
             echo -e "${YELLOW}Versión del paquete: $repo_version${NC}"
-            local older
-            older=$(printf '%s\n' "$installed_version" "$repo_version" | sort -V | head -n1)
-            if [ "$older" = "$installed_version" ] && [ "$installed_version" != "$repo_version" ]; then
+
+            if [ "$installed_version" != "$repo_version" ]; then
                 echo -e "${GREEN}Hay una actualización disponible.${NC}"
                 return 0
-            elif [ "$installed_version" = "$repo_version" ]; then
+            else
                 echo -e "${GREEN}Ya tienes la última versión.${NC}"
                 if [ $auto_yes -eq 0 ]; then
                     read -p "¿Reinstalar igualmente? [s/N] " rein < /dev/tty
@@ -658,20 +707,6 @@ version_check() {
                     echo -e "${YELLOW}Usando -y: se reinstalará.${NC}"
                 fi
                 return 0
-            else
-                echo -e "${YELLOW}La versión instalada ($installed_version) es más reciente que la del paquete ($repo_version).${NC}"
-                if [ $auto_yes -eq 0 ]; then
-                    read -p "¿Quieres actualizar (downgrade) a la versión del paquete? [s/N] " resp < /dev/tty
-                    if [[ "$resp" =~ ^[sSyY] ]]; then
-                        return 0
-                    else
-                        echo -e "${YELLOW}No se hará nada.${NC}"
-                        return 1
-                    fi
-                else
-                    echo -e "${YELLOW}Usando -y: se actualizará (downgrade) automáticamente.${NC}"
-                    return 0
-                fi
             fi
         else
             echo -e "${YELLOW}Paquete instalado pero sin archivo VERSION. Se reinstalará.${NC}"
@@ -728,7 +763,7 @@ install_one() {
     # Version check ANTES de dependencias
     # ---------------------------
     if ! version_check "$APP_DIR" "$PKG_NAME" "$REPO_VERSION" "$AUTO_YES"; then
-        return 0
+        return 2  # Omitido por usuario
     fi
 
     # ---------------------------
@@ -847,14 +882,14 @@ install_from_file() {
         return 1
     fi
 
+    # Validar extensión
+    if ! is_valid_package_file "$ARCHIVE_FILE"; then
+        echo -e "${RED}Error: '$ARCHIVE_FILE' no es un paquete Casata válido (formatos: .casata, .zip, .tar.gz, .tgz, .tar.xz, .tar).${NC}"
+        return 1
+    fi
+
     local PKG_NAME
-    PKG_NAME=$(basename "$ARCHIVE_FILE")
-    PKG_NAME="${PKG_NAME%.casata}"
-    PKG_NAME="${PKG_NAME%.tar.gz}"
-    PKG_NAME="${PKG_NAME%.tgz}"
-    PKG_NAME="${PKG_NAME%.tar.xz}"
-    PKG_NAME="${PKG_NAME%.zip}"
-    PKG_NAME="${PKG_NAME%.tar}"
+    PKG_NAME=$(normalize_pkg_name "$(basename "$ARCHIVE_FILE")")
 
     APPS_DIR="$GLOBAL_ROOT/apps"
     GUIDE_TARGET="GUIDE.json"
@@ -864,34 +899,86 @@ install_from_file() {
     EXTRACT_DIR=$(mktemp -d)
 
     echo -e "${GREEN}Extrayendo $PKG_NAME desde archivo local...${NC}"
-    extract_archive "$ARCHIVE_FILE" "$EXTRACT_DIR" || { rm -rf "$EXTRACT_DIR"; return 1; }
-
-    if [ -f "$SRC_DIR/VERSION" ]; then
-        REPO_VERSION=$(cat "$SRC_DIR/VERSION")
-    else
-        echo -e "${RED}Error: El paquete no contiene archivo VERSION.${NC}"
+    if ! extract_archive "$ARCHIVE_FILE" "$EXTRACT_DIR"; then
         rm -rf "$EXTRACT_DIR"
         return 1
     fi
 
-    # Leer dependencias opcionales de DEPS.json
+    # --- Metadatos: prioridad DATA.json -> base de datos global -> VERSION/DEPS.json ---
+    local DATA_FILE="$SRC_DIR/DATA.json"
+    local VERSION_FILE="$SRC_DIR/VERSION"
+    local DEPS_FILE="$SRC_DIR/DEPS.json"
+
+    local REPO_VERSION=""
+    local SHA256=""
     local -a APT_DEPS=() PACMAN_DEPS=() DNF_DEPS=() PIP_DEPS=() CASATA_DEPS=()
-    if [ -f "$SRC_DIR/DEPS.json" ]; then
-        echo -e "${YELLOW}Se encontró DEPS.json, procesando dependencias...${NC}"
-        split_to_array APT_DEPS "$(jq -r '.apt? // [] | .[]' "$SRC_DIR/DEPS.json")"
-        split_to_array PACMAN_DEPS "$(jq -r '.pacman? // [] | .[]' "$SRC_DIR/DEPS.json")"
-        split_to_array DNF_DEPS "$(jq -r '.dnf? // [] | .[]' "$SRC_DIR/DEPS.json")"
-        split_to_array PIP_DEPS "$(jq -r '.pip? // [] | .[]' "$SRC_DIR/DEPS.json")"
-        split_to_array CASATA_DEPS "$(jq -r '.casata? // [] | .[]' "$SRC_DIR/DEPS.json")"
+
+    if [ -f "$DATA_FILE" ]; then
+        echo -e "${YELLOW}Se encontró DATA.json, usando metadatos del paquete.${NC}"
+        REPO_VERSION=$(jq -r '.version // "0.0.0"' "$DATA_FILE" 2>/dev/null || true)
+        SHA256=$(jq -r '.sha256 // empty' "$DATA_FILE" 2>/dev/null || true)
+        split_to_array APT_DEPS "$(jq -r '.apt? // [] | .[]' "$DATA_FILE" 2>/dev/null || true)" || true
+        split_to_array PACMAN_DEPS "$(jq -r '.pacman? // [] | .[]' "$DATA_FILE" 2>/dev/null || true)" || true
+        split_to_array DNF_DEPS "$(jq -r '.dnf? // [] | .[]' "$DATA_FILE" 2>/dev/null || true)" || true
+        split_to_array PIP_DEPS "$(jq -r '.pip? // [] | .[]' "$DATA_FILE" 2>/dev/null || true)" || true
+        split_to_array CASATA_DEPS "$(jq -r '.casata? // [] | .[]' "$DATA_FILE" 2>/dev/null || true)" || true
+    else
+        # Buscar en base de datos global usando nombre normalizado en minúsculas
+        local global_json="$DATA_DIR/${PKG_NAME}.json"
+        if [ -f "$global_json" ]; then
+            # Verificar que el JSON sea válido antes de extraer
+            if jq empty "$global_json" 2>/dev/null; then
+                echo -e "${YELLOW}No se encontró DATA.json. Usando metadatos de la base de datos global para '$PKG_NAME'.${NC}"
+                REPO_VERSION=$(jq -r '.version // "0.0.0"' "$global_json" 2>/dev/null || true)
+                SHA256=$(jq -r '.sha256 // empty' "$global_json" 2>/dev/null || true)
+                split_to_array APT_DEPS "$(jq -r '.apt? // [] | .[]' "$global_json" 2>/dev/null || true)" || true
+                split_to_array PACMAN_DEPS "$(jq -r '.pacman? // [] | .[]' "$global_json" 2>/dev/null || true)" || true
+                split_to_array DNF_DEPS "$(jq -r '.dnf? // [] | .[]' "$global_json" 2>/dev/null || true)" || true
+                split_to_array PIP_DEPS "$(jq -r '.pip? // [] | .[]' "$global_json" 2>/dev/null || true)" || true
+                split_to_array CASATA_DEPS "$(jq -r '.casata? // [] | .[]' "$global_json" 2>/dev/null || true)" || true
+            else
+                echo -e "${YELLOW}Advertencia: El archivo de base de datos global '$global_json' no es un JSON válido. Intentando con VERSION...${NC}"
+                if [ -f "$VERSION_FILE" ]; then
+                    REPO_VERSION=$(cat "$VERSION_FILE" 2>/dev/null || true)
+                    if [ -f "$DEPS_FILE" ]; then
+                        echo -e "${YELLOW}Se encontró DEPS.json, procesando dependencias...${NC}"
+                        split_to_array APT_DEPS "$(jq -r '.apt? // [] | .[]' "$DEPS_FILE" 2>/dev/null || true)" || true
+                        split_to_array PACMAN_DEPS "$(jq -r '.pacman? // [] | .[]' "$DEPS_FILE" 2>/dev/null || true)" || true
+                        split_to_array DNF_DEPS "$(jq -r '.dnf? // [] | .[]' "$DEPS_FILE" 2>/dev/null || true)" || true
+                        split_to_array PIP_DEPS "$(jq -r '.pip? // [] | .[]' "$DEPS_FILE" 2>/dev/null || true)" || true
+                        split_to_array CASATA_DEPS "$(jq -r '.casata? // [] | .[]' "$DEPS_FILE" 2>/dev/null || true)" || true
+                    fi
+                else
+                    echo -e "${RED}Error: El paquete no contiene DATA.json, VERSION, y la base de datos global es inválida.${NC}"
+                    rm -rf "$EXTRACT_DIR"
+                    return 1
+                fi
+            fi
+        elif [ -f "$VERSION_FILE" ]; then
+            echo -e "${YELLOW}No se encontró DATA.json ni base de datos global. Usando archivo VERSION y DEPS.json si existe.${NC}"
+            REPO_VERSION=$(cat "$VERSION_FILE" 2>/dev/null || true)
+            if [ -f "$DEPS_FILE" ]; then
+                echo -e "${YELLOW}Se encontró DEPS.json, procesando dependencias...${NC}"
+                split_to_array APT_DEPS "$(jq -r '.apt? // [] | .[]' "$DEPS_FILE" 2>/dev/null || true)" || true
+                split_to_array PACMAN_DEPS "$(jq -r '.pacman? // [] | .[]' "$DEPS_FILE" 2>/dev/null || true)" || true
+                split_to_array DNF_DEPS "$(jq -r '.dnf? // [] | .[]' "$DEPS_FILE" 2>/dev/null || true)" || true
+                split_to_array PIP_DEPS "$(jq -r '.pip? // [] | .[]' "$DEPS_FILE" 2>/dev/null || true)" || true
+                split_to_array CASATA_DEPS "$(jq -r '.casata? // [] | .[]' "$DEPS_FILE" 2>/dev/null || true)" || true
+            fi
+        else
+            echo -e "${RED}Error: El paquete no contiene DATA.json, VERSION, y no se encontró en la base de datos global.${NC}"
+            rm -rf "$EXTRACT_DIR"
+            return 1
+        fi
     fi
 
     # Version check antes de dependencias
     if ! version_check "$APP_DIR" "$PKG_NAME" "$REPO_VERSION" "$AUTO_YES"; then
         rm -rf "$EXTRACT_DIR"
-        return 0
+        return 2  # Omitido por usuario
     fi
 
-    # Instalar dependencias
+    # Instalar dependencias (con preguntas si no -y)
     if [ "${SKIP_SYSTEM_DEPS:-0}" -eq 0 ]; then
         local -a SYSTEM_DEPS=()
         case "$PKG_MANAGER" in
@@ -979,15 +1066,11 @@ if ! command -v jq &>/dev/null || ! command -v wget &>/dev/null; then
     exit 1
 fi
 
-# Cargar rutas protegidas desde SAVE_FILES.txt
-load_protected_paths
-
 # Variables globales
 AUTO_YES=0
 FILE_MODE=0
 PACKAGES=()
-
-init_package_manager
+ORIGINAL_ARGS=("$@")
 
 # Parseo de argumentos
 while [[ $# -gt 0 ]]; do
@@ -1008,13 +1091,33 @@ if [ ${#PACKAGES[@]} -eq 0 ]; then
     exit 1
 fi
 
+# Auto-detectar archivos locales (solo extensiones válidas)
+if [ $FILE_MODE -eq 0 ]; then
+    all_files=1
+    for pkg in "${PACKAGES[@]}"; do
+        if ! is_valid_package_file "$pkg"; then
+            all_files=0
+            break
+        fi
+    done
+    if [ $all_files -eq 1 ]; then
+        FILE_MODE=1
+        echo -e "${YELLOW}Detectados archivos locales, activando modo archivo.${NC}"
+    fi
+fi
+
 # Redirigir actualización de Casata si es el único paquete y no es modo archivo
 if [ $FILE_MODE -eq 0 ] && [ ${#PACKAGES[@]} -eq 1 ] && [ "${PACKAGES[0]}" == "casata" ]; then
     echo -e "${GREEN}Redirigiendo a la actualización de Casata...${NC}"
-    exec "$GLOBAL_ROOT/modules/install-casata.sh" "$@"
+    exec "$GLOBAL_ROOT/modules/install-casata.sh" "${ORIGINAL_ARGS[@]}"
     echo -e "${RED}Error: No se pudo ejecutar el módulo de actualización de Casata.${NC}"
     exit 1
 fi
+
+# Cargar rutas protegidas desde SAVE_FILES.txt
+load_protected_paths
+
+init_package_manager
 
 # ----------------------------
 # Modo archivo local (.casata)
@@ -1025,17 +1128,20 @@ if [ $FILE_MODE -eq 1 ]; then
         echo -e "\n${GREEN}========================================${NC}"
         echo -e "${GREEN}Instalando desde archivo: $FILE${NC}"
         echo -e "${GREEN}========================================${NC}"
-        if install_from_file "$FILE" "$AUTO_YES"; then
-            echo -e "${GREEN}✔ $FILE instalado correctamente.${NC}"
-        else
-            echo -e "${RED}✖ Falló la instalación de $FILE.${NC}"
-            FAILED+=("$FILE")
-        fi
+        set +e
+        install_from_file "$FILE" "$AUTO_YES"
+        ret=$?
+        set -e
+        case $ret in
+            0) echo -e "${GREEN}✔ $FILE instalado correctamente.${NC}" ;;
+            2) echo -e "${YELLOW}⊘ $FILE omitido (instalación cancelada).${NC}" ;;
+            *) echo -e "${RED}✖ Falló la instalación de $FILE.${NC}"; FAILED+=("$FILE") ;;
+        esac
     done
 
     echo -e "\n${GREEN}════════════════════════════════════════${NC}"
     if [ ${#FAILED[@]} -eq 0 ]; then
-        echo -e "${GREEN}✓ Todos los archivos se instalaron correctamente.${NC}"
+        echo -e "${GREEN}✓ Todos los archivos se procesaron correctamente.${NC}"
     else
         echo -e "${RED}✖ Los siguientes archivos fallaron: ${FAILED[*]}${NC}"
     fi
@@ -1126,17 +1232,20 @@ if [ ${#PACKAGES[@]} -gt 1 ]; then
         echo -e "\n${GREEN}========================================${NC}"
         echo -e "${GREEN}Instalando: $PKG${NC}"
         echo -e "${GREEN}========================================${NC}"
-        if install_one "$PKG" "$AUTO_YES"; then
-            echo -e "${GREEN}✔ $PKG instalado correctamente.${NC}"
-        else
-            echo -e "${RED}✖ Falló la instalación de $PKG.${NC}"
-            FAILED+=("$PKG")
-        fi
+        set +e
+        install_one "$PKG" "$AUTO_YES"
+        ret=$?
+        set -e
+        case $ret in
+            0) echo -e "${GREEN}✔ $PKG instalado correctamente.${NC}" ;;
+            2) echo -e "${YELLOW}⊘ $PKG omitido (instalación cancelada).${NC}" ;;
+            *) echo -e "${RED}✖ Falló la instalación de $PKG.${NC}"; FAILED+=("$PKG") ;;
+        esac
     done
 
     echo -e "\n${GREEN}════════════════════════════════════════${NC}"
     if [ ${#FAILED[@]} -eq 0 ]; then
-        echo -e "${GREEN}✓ Todos los paquetes se instalaron correctamente.${NC}"
+        echo -e "${GREEN}✓ Todos los paquetes se procesaron correctamente.${NC}"
     else
         echo -e "${RED}✖ Los siguientes paquetes fallaron: ${FAILED[*]}${NC}"
     fi
@@ -1156,17 +1265,20 @@ for PKG in "${PACKAGES[@]}"; do
     echo -e "\n${GREEN}========================================${NC}"
     echo -e "${GREEN}Instalando: $PKG${NC}"
     echo -e "${GREEN}========================================${NC}"
-    if install_one "$PKG" "$AUTO_YES"; then
-        echo -e "${GREEN}✔ $PKG instalado correctamente.${NC}"
-    else
-        echo -e "${RED}✖ Falló la instalación de $PKG.${NC}"
-        FAILED+=("$PKG")
-    fi
+    set +e
+    install_one "$PKG" "$AUTO_YES"
+    ret=$?
+    set -e
+    case $ret in
+        0) echo -e "${GREEN}✔ $PKG instalado correctamente.${NC}" ;;
+        2) echo -e "${YELLOW}⊘ $PKG omitido (instalación cancelada).${NC}" ;;
+        *) echo -e "${RED}✖ Falló la instalación de $PKG.${NC}"; FAILED+=("$PKG") ;;
+    esac
 done
 
 echo -e "\n${GREEN}════════════════════════════════════════${NC}"
 if [ ${#FAILED[@]} -eq 0 ]; then
-    echo -e "${GREEN}✓ Todos los paquetes se instalaron correctamente.${NC}"
+    echo -e "${GREEN}✓ Todos los paquetes se procesaron correctamente.${NC}"
 else
     echo -e "${RED}✖ Los siguientes paquetes fallaron: ${FAILED[*]}${NC}"
 fi
