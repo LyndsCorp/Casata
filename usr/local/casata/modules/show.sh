@@ -1,7 +1,7 @@
 #!/bin/bash
 # /usr/local/casata/modules/show.sh
 # Muestra información técnica de las aplicaciones instaladas globalmente
-# y metadatos del repositorio si están disponibles.
+# incluyendo tamaño en disco y tamaño declarado en metadatos.
 
 shopt -s nullglob
 
@@ -24,10 +24,25 @@ show_app_info() {
     echo -e "${GREEN}📦 $pkg_name${NC}"
     echo -e "  ${YELLOW}Ruta:${NC} $app_dir"
 
-    # Tamaño
+    # Tamaño en disco (tamaño lógico)
     if [ -d "$app_dir" ]; then
-        size=$(du -sh "$app_dir" 2>/dev/null | cut -f1)
-        echo -e "  ${YELLOW}Tamaño en disco:${NC} $size"
+        size_disk=$(du -sh "$app_dir" 2>/dev/null | cut -f1)
+        echo -e "  ${YELLOW}Tamaño en disco:${NC} $size_disk"
+    else
+        echo -e "  ${YELLOW}Tamaño en disco:${NC} (no disponible)"
+    fi
+
+    # Tamaño según metadatos
+    local meta_file="$DATA_DIR/${pkg_name}.json"
+    if [ -f "$meta_file" ]; then
+        size_meta=$(jq -r '.size // ""' "$meta_file" 2>/dev/null)
+        if [ -n "$size_meta" ]; then
+            echo -e "  ${YELLOW}Tamaño según metadatos:${NC} $size_meta"
+        else
+            echo -e "  ${YELLOW}Tamaño según metadatos:${NC} (no especificado)"
+        fi
+    else
+        echo -e "  ${YELLOW}Tamaño según metadatos:${NC} (no hay metadatos)"
     fi
 
     # Versión
@@ -56,7 +71,6 @@ show_app_info() {
     fi
 
     # ---- Mostrar metadatos del repositorio si existen ----
-    local meta_file="$DATA_DIR/${pkg_name}.json"
     if [ -f "$meta_file" ]; then
         echo -e "  ${YELLOW}Metadatos del repositorio:${NC}"
         local is_open=$(jq -r '.is_open_sorce // false' "$meta_file" 2>/dev/null)
@@ -97,9 +111,6 @@ show_app_info() {
         [ -z "$copyright_year" ] && missing+=("copyright_year")
         if [ "$is_open" = "true" ] && [ -z "$source_code" ]; then
             missing+=("source_code")
-        fi
-        if [ ${#missing[@]} -gt 0 ]; then
-            echo -e "    ${YELLOW}⚠ Metadatos faltantes: ${missing[*]}${NC}"
         fi
     fi
 
