@@ -2,10 +2,7 @@
 
 # /usr/local/casata/modules/update.sh
 # Copyright (C) 2026, GPL v3+, Lynds Corp., Aros Legendarios, David Baña Szymaniak
-# Script de actualización de repositorios de Casata (versión 1.3.4.2)
-
-# Novedades:
-#   - Valida que los nombres no contengan '/' (evita path traversal).
+# Script de actualización de repositorios de Casata
 
 shopt -s nullglob
 set -euo pipefail
@@ -273,20 +270,22 @@ if [ ${#REQUESTED_FILES[@]} -gt 0 ]; then
         REQUESTED_SET["$f"]=1
     done
 
+    declare -A ORDERED_SET
     declare -a ORDERED_TARGETS=()
 
     # Primero los que están en PRIORITY, en el orden de PRIORITY
     for pf in "${PRIORITY_FILES[@]}"; do
-        if [[ -v REQUESTED_SET["$pf"] ]]; then
+        if [[ -v REQUESTED_SET["$pf"] ]] && [ -z "${ORDERED_SET["$pf"]+x}" ]; then
             ORDERED_TARGETS+=("$pf")
-            unset REQUESTED_SET["$pf"]
+            ORDERED_SET["$pf"]=1
         fi
     done
 
     # Después el resto, en el orden dado por el usuario
     for f in "${REQUESTED_FILES[@]}"; do
-        if [[ -v REQUESTED_SET["$f"] ]]; then
+        if [ -z "${ORDERED_SET["$f"]+x}" ]; then
             ORDERED_TARGETS+=("$f")
+            ORDERED_SET["$f"]=1
         fi
     done
 
