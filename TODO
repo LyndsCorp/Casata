@@ -19,7 +19,7 @@
 [X] Que los metadatos de paquetes puedan tener el VERSION como una URL para solo tener que modificar el archivo VERSION del paquete.
     Para distinguir, que mire las primeras 4 letras y si son "http" en vez de números, entonces es una URL.
 
-[ ] Para facilitar la distribución de paquetes de terceros sin necesidad de hacer un fork o cosas así, que los metadatos puedan tener un campo que si es true, entonces Casata no va a utilizar metadatos en el paquete, sino todo del JSON del data.
+[/] Para facilitar la distribución de paquetes de terceros sin necesidad de hacer un fork o cosas así, que los metadatos puedan tener un campo que si es true, entonces Casata no va a utilizar metadatos en el paquete, sino todo del JSON del data.
     Estos tendrían directamente el version y el GUIDE dentro del data en vez del paquete.
     También que el data.json tenga una parte de que el paquete además de utilizar el release oficial, el distribuidor pueda añadir archivos propios que irán en el paquete antes de que la parte de GUIDE haga lo suyo. Sirve para por ejemplo utilizar las releases oficiales de Zen pero teniendo un .desktop propio (ya que las releases suelen no traer un .desktop)
 
