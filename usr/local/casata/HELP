@@ -33,6 +33,10 @@ COMANDOS:
   
   clean                                  → Limpia huérfanos (singrepos/datos no referenciados)
 
+  download                               → Descarga los paquetes de los repositorios en vez de instalarlos. Perfecto para tenerlo offline
+           [--path RUTA]                 → Descarga el paquete en la ruta seleccionada en vez de la carpeta de Descargas
+           [--extract|-e]                → Descarga el paquete descomprimido
+
   motd                                   → Muestra el mensaje del día de hoy
        [dia de la semana (lunes...)]
        [dia relativo a hoy (ayer...)]
