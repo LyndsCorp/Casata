@@ -1,7 +1,7 @@
 #!/bin/bash
 # /usr/local/casata/modules/show.sh
 # Muestra información técnica de las aplicaciones instaladas globalmente
-# incluyendo tamaño en disco y tamaño declarado en metadatos.
+# incluyendo tamaño lógico, tamaño en disco y tamaño declarado en metadatos.
 
 shopt -s nullglob
 
@@ -15,6 +15,25 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+# ------------------------------------------------------------
+# Convierte bytes a formato legible (KiB, MiB, GiB)
+# ------------------------------------------------------------
+human_readable() {
+    local bytes="$1"
+    if [ -z "$bytes" ] || [ "$bytes" -eq 0 ]; then
+        echo "0 bytes"
+        return
+    fi
+    local units=("bytes" "KiB" "MiB" "GiB" "TiB")
+    local i=0
+    local size=$bytes
+    while [ "$size" -gt 1024 ] && [ $i -lt 4 ]; do
+        size=$((size / 1024))
+        i=$((i + 1))
+    done
+    echo "$size ${units[$i]}"
+}
+
 # Función para mostrar detalles de una app
 show_app_info() {
     local app_dir="$1"
@@ -24,15 +43,30 @@ show_app_info() {
     echo -e "${GREEN}📦 $pkg_name${NC}"
     echo -e "  ${YELLOW}Ruta:${NC} $app_dir"
 
-    # Tamaño en disco (tamaño lógico)
+    # --- Tamaño lógico (suma de bytes de todos los archivos) ---
     if [ -d "$app_dir" ]; then
-        size_disk=$(du -sh "$app_dir" 2>/dev/null | cut -f1)
-        echo -e "  ${YELLOW}Tamaño en disco:${NC} $size_disk"
+        # Tamaño lógico con --apparent-size
+        size_logical_bytes=$(du -sb --apparent-size "$app_dir" 2>/dev/null | cut -f1)
+        if [ -n "$size_logical_bytes" ] && [ "$size_logical_bytes" -gt 0 ]; then
+            size_logical_human=$(human_readable "$size_logical_bytes")
+            echo -e "  ${YELLOW}Tamaño lógico:${NC} $size_logical_bytes bytes ($size_logical_human)"
+        else
+            echo -e "  ${YELLOW}Tamaño lógico:${NC} (no disponible)"
+        fi
+
+        # --- Tamaño en disco (espacio ocupado en bloques) ---
+        size_disk_human=$(du -sh "$app_dir" 2>/dev/null | cut -f1)
+        if [ -n "$size_disk_human" ]; then
+            echo -e "  ${YELLOW}Tamaño en disco:${NC} $size_disk_human"
+        else
+            echo -e "  ${YELLOW}Tamaño en disco:${NC} (no disponible)"
+        fi
     else
-        echo -e "  ${YELLOW}Tamaño en disco:${NC} (no disponible)"
+        echo -e "  ${YELLOW}Tamaño lógico:${NC} (directorio no accesible)"
+        echo -e "  ${YELLOW}Tamaño en disco:${NC} (directorio no accesible)"
     fi
 
-    # Tamaño según metadatos
+    # --- Tamaño según metadatos ---
     local meta_file="$DATA_DIR/${pkg_name}.json"
     if [ -f "$meta_file" ]; then
         size_meta=$(jq -r '.size // ""' "$meta_file" 2>/dev/null)
@@ -102,7 +136,7 @@ show_app_info() {
             echo -e "    Copyright: ${YELLOW}(no especificado)${NC}"
         fi
 
-        # Advertencia de metadatos faltantes (solo si es un paquete instalado)
+        # Advertencia de metadatos faltantes
         local missing=()
         [ -z "$license" ] && missing+=("license")
         [ -z "$origin" ] && missing+=("origin")
