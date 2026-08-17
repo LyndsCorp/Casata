@@ -705,7 +705,7 @@ version_check() {
             # Versión instalada: se lee directamente del archivo VERSION (nunca es URL)
             installed_version=$(cat "$app_dir/VERSION" 2>/dev/null || echo "0.0.0")
             echo -e "${YELLOW}Versión instalada: $installed_version${NC}"
-            echo -e "${YELLOW}Versión del paquete: $repo_version${NC}"
+            echo -e "${YELLOW}Versión de remota: $repo_version${NC}"
 
             if [ "$installed_version" != "$repo_version" ]; then
                 echo -e "${GREEN}Hay una actualización disponible.${NC}"
@@ -1086,6 +1086,10 @@ install_from_file() {
 # ============================================================
 if ! command -v jq &>/dev/null || ! command -v wget &>/dev/null; then
     echo -e "${RED}Error: Se requieren 'jq' y 'wget'.${NC}"
+    echo "En Debian/Ubuntu: sudo apt install jq wget"
+    echo "En Arch Linux:    sudo pacman -S jq wget"
+    echo "En Fedora:        sudo dnf install jq wget"
+
     exit 1
 fi
 
