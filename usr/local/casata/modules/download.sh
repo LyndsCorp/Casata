@@ -25,15 +25,14 @@ usage() {
 Uso: casata download [OPCIONES] <paquete> [paquete2 ...]
 
 Descarga el archivo ZIP/TAR del paquete en la carpeta indicada.
-Por defecto se descarga en la carpeta de descargas del usuario,
-respetando XDG_DOWNLOAD_DIR de ~/.config/user-dirs.dirs.
+Por defecto se descarga en la carpeta de descargas del usuario.
 
 Opciones:
   -e, --extract    Descomprimir el paquete descargado y eliminar el comprimido.
   --path <ruta>    Carpeta de destino (ej. ~/Documentos).
   -h, --help       Mostrar esta ayuda.
 
-El archivo se guarda como <nombre_original>.casata (ej. app.tar.gz.casata).
+El archivo se guarda como <nombre_paquete>.<extension>.casata (ej. app.tar.gz.casata).
 EOF
 }
 
@@ -89,6 +88,28 @@ get_download_dir() {
 }
 
 # ------------------------------------------------------------
+# Extraer la extensión del archivo remoto
+# Mantiene extensiones compuestas como tar.gz, tar.xz, etc.
+# ------------------------------------------------------------
+get_file_extension() {
+    local url="$1"
+    local filename
+    local lower
+
+    filename=$(basename "$url" | cut -d '?' -f1)
+    lower=$(printf '%s' "$filename" | tr '[:upper:]' '[:lower:]')
+
+    # Detectar extensiones compuestas primero
+    if [[ "$lower" =~ \.(tar\.gz|tar\.xz|tar\.bz2|tgz|txz|tbz2)$ ]]; then
+        printf '%s' "${BASH_REMATCH[1]}"
+    elif [[ "$lower" =~ \.([a-z0-9]+)$ ]]; then
+        printf '%s' "${BASH_REMATCH[1]}"
+    else
+        printf ''
+    fi
+}
+
+# ------------------------------------------------------------
 # Extraer según la extensión original
 # ------------------------------------------------------------
 extract_archive() {
@@ -133,7 +154,7 @@ extract_archive() {
 download_one() {
     local pkg="$1"
     local extract="$2"
-    local download_url original_filename final_filename final_path
+    local download_url original_filename file_ext final_filename final_path
 
     if [[ "$pkg" == */* ]]; then
         echo -e "${RED}Error: Nombre de paquete inválido: '$pkg'.${NC}" >&2
@@ -162,7 +183,15 @@ download_one() {
         return 1
     fi
 
-    final_filename="${original_filename}.casata"
+    # Extraer la extensión del archivo remoto
+    file_ext=$(get_file_extension "$download_url")
+    if [ -z "$file_ext" ]; then
+        echo -e "${RED}Error: No se pudo determinar la extensión del archivo para '$pkg'.${NC}" >&2
+        return 1
+    fi
+
+    # Formato: <nombre_paquete>.<extensión>.casata
+    final_filename="${pkg}.${file_ext}.casata"
     final_path="$DOWNLOAD_DIR/$final_filename"
 
     mkdir -p "$DOWNLOAD_DIR"
