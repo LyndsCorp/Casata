@@ -570,6 +570,37 @@ extract_archive() {
 }
 
 # ------------------------------------------------------------
+# Descargar archivos externos desde URLs
+# ------------------------------------------------------------
+download_external_files() {
+    local app_dir="$1"
+    local -n urls_ref="$2"
+    [ ${#urls_ref[@]} -eq 0 ] && return 0
+
+    echo -e "${YELLOW}Descargando archivos externos...${NC}"
+    local counter=0
+    for url in "${urls_ref[@]}"; do
+        [ -z "$url" ] && continue
+        counter=$((counter+1))
+
+        # Limpiar query string y obtener el nombre de archivo
+        local clean_url="${url%%\?*}"
+        local filename
+        filename=$(basename "$clean_url" 2>/dev/null || true)
+        if [ -z "$filename" ] || [ "$filename" == "/" ]; then
+            filename="external_file_$counter"
+        fi
+
+        echo -e "   ${YELLOW}→ Descargando $filename desde $url${NC}"
+        if ! wget -q --show-progress -O "$app_dir/$filename" "$url"; then
+            echo -e "${RED}Error al descargar $url${NC}"
+            return 1
+        fi
+    done
+    return 0
+}
+
+# ------------------------------------------------------------
 # Crear enlaces simbólicos según GUIDE.json con protecciones
 # ------------------------------------------------------------
 create_symlinks() {
@@ -759,6 +790,27 @@ install_one() {
         return 1
     fi
 
+    # ------------------------------------------------------------------
+    # Si el download_url es "external", consultamos external_metadata
+    # ------------------------------------------------------------------
+    if [[ "$DOWNLOAD_URL" == "external" ]]; then
+        local external_metadata
+        external_metadata=$(jq -r '.external_metadata // false' "$PKG_FILE" 2>/dev/null || echo "false")
+        if [[ "$external_metadata" == "true" ]]; then
+            local RELEASE_URL
+            RELEASE_URL=$(jq -r '.release.url // empty' "$PKG_FILE" 2>/dev/null || true)
+            if [ -z "$RELEASE_URL" ]; then
+                echo -e "${RED}Error: external_metadata es true pero no se encontró 'release.url'.${NC}"
+                return 1
+            fi
+            DOWNLOAD_URL="$RELEASE_URL"
+            echo -e "${GREEN}Usando URL de release oficial: $DOWNLOAD_URL${NC}"
+        else
+            echo -e "${RED}Error: download_url es 'external' pero external_metadata no es true. No se puede determinar la URL de descarga.${NC}"
+            return 1
+        fi
+    fi
+
     REPO_VERSION=$(jq -r '.version // "0.0.0"' "$PKG_FILE")
     # El campo version de metadatos puede ser URL, resolver
     if ! REPO_VERSION=$(resolve_version "$REPO_VERSION"); then
@@ -766,6 +818,10 @@ install_one() {
         echo -e "${YELLOW}No se pudo resolver la versión del repositorio; se asume 0.0.0.${NC}"
     fi
     SHA256=$(jq -r '.sha256 // empty' "$PKG_FILE")
+
+    # Leer archivos externos
+    local -a EXTERNAL_FILES=()
+    split_to_array EXTERNAL_FILES "$(jq -r '.external_files? // [] | .[]' "$PKG_FILE" 2>/dev/null || true)" || true
 
     # Leer dependencias en arrays
     local -a APT_DEPS=() PACMAN_DEPS=() DNF_DEPS=() PIP_DEPS=() CASATA_DEPS=()
@@ -875,6 +931,11 @@ install_one() {
     rm -rf "$EXTRACT_DIR" "$ARCHIVE_PATH"
     EXTRACT_DIR=""
 
+    # Descargar archivos externos si los hay
+    if [ ${#EXTERNAL_FILES[@]} -gt 0 ]; then
+        download_external_files "$APP_DIR" EXTERNAL_FILES || return 1
+    fi
+
     create_symlinks "$APP_DIR" "$GUIDE_TARGET" "$PKG_NAME" "$AUTO_YES"
     maybe_run_guide "$PKG_NAME" "$APP_DIR" "$AUTO_YES" "$REPO_VERSION"
 
@@ -922,6 +983,7 @@ install_from_file() {
     local REPO_VERSION=""
     local SHA256=""
     local -a APT_DEPS=() PACMAN_DEPS=() DNF_DEPS=() PIP_DEPS=() CASATA_DEPS=()
+    local -a EXTERNAL_FILES=()
     local EXTERNAL_MODE=0
     local RELEASE_URL=""
     local GUIDE_ARRAY=""
@@ -965,6 +1027,8 @@ install_from_file() {
         split_to_array DNF_DEPS "$(jq -r '.dnf? // [] | .[]' "$DATA_FILE" 2>/dev/null || true)" || true
         split_to_array PIP_DEPS "$(jq -r '.pip? // [] | .[]' "$DATA_FILE" 2>/dev/null || true)" || true
         split_to_array CASATA_DEPS "$(jq -r '.casata? // [] | .[]' "$DATA_FILE" 2>/dev/null || true)" || true
+        # Leer archivos externos
+        split_to_array EXTERNAL_FILES "$(jq -r '.external_files? // [] | .[]' "$DATA_FILE" 2>/dev/null || true)" || true
     else
         # Si no hay DATA.json, intentar usar base de datos global o VERSION/DEPS.json (comportamiento anterior)
         local global_json="$DATA_DIR/${PKG_NAME}.json"
@@ -982,6 +1046,7 @@ install_from_file() {
                 split_to_array DNF_DEPS "$(jq -r '.dnf? // [] | .[]' "$global_json" 2>/dev/null || true)" || true
                 split_to_array PIP_DEPS "$(jq -r '.pip? // [] | .[]' "$global_json" 2>/dev/null || true)" || true
                 split_to_array CASATA_DEPS "$(jq -r '.casata? // [] | .[]' "$global_json" 2>/dev/null || true)" || true
+                split_to_array EXTERNAL_FILES "$(jq -r '.external_files? // [] | .[]' "$global_json" 2>/dev/null || true)" || true
             else
                 echo -e "${YELLOW}Advertencia: El archivo de base de datos global '$global_json' no es un JSON válido. Intentando con VERSION...${NC}"
                 local version_file="$SRC_DIR/VERSION"
@@ -995,6 +1060,7 @@ install_from_file() {
                         split_to_array DNF_DEPS "$(jq -r '.dnf? // [] | .[]' "$deps_file" 2>/dev/null || true)" || true
                         split_to_array PIP_DEPS "$(jq -r '.pip? // [] | .[]' "$deps_file" 2>/dev/null || true)" || true
                         split_to_array CASATA_DEPS "$(jq -r '.casata? // [] | .[]' "$deps_file" 2>/dev/null || true)" || true
+                        split_to_array EXTERNAL_FILES "$(jq -r '.external_files? // [] | .[]' "$deps_file" 2>/dev/null || true)" || true
                     fi
                 else
                     echo -e "${RED}Error: El paquete no contiene DATA.json, VERSION, y la base de datos global es inválida.${NC}"
@@ -1012,6 +1078,7 @@ install_from_file() {
                 split_to_array DNF_DEPS "$(jq -r '.dnf? // [] | .[]' "$SRC_DIR/DEPS.json" 2>/dev/null || true)" || true
                 split_to_array PIP_DEPS "$(jq -r '.pip? // [] | .[]' "$SRC_DIR/DEPS.json" 2>/dev/null || true)" || true
                 split_to_array CASATA_DEPS "$(jq -r '.casata? // [] | .[]' "$SRC_DIR/DEPS.json" 2>/dev/null || true)" || true
+                split_to_array EXTERNAL_FILES "$(jq -r '.external_files? // [] | .[]' "$SRC_DIR/DEPS.json" 2>/dev/null || true)" || true
             fi
         else
             echo -e "${RED}Error: El paquete no contiene DATA.json, VERSION, y no se encontró en la base de datos global.${NC}"
@@ -1151,6 +1218,11 @@ install_from_file() {
     # Limpiar directorio de extracción del .casata
     rm -rf "$EXTRACT_DIR"
     EXTRACT_DIR=""
+
+    # Descargar archivos externos si los hay
+    if [ ${#EXTERNAL_FILES[@]} -gt 0 ]; then
+        download_external_files "$APP_DIR" EXTERNAL_FILES || return 1
+    fi
 
     # ------------------------------------------------------------
     # Crear enlaces simbólicos según GUIDE
