@@ -99,7 +99,8 @@ DEPS=$(jq -r '.dependencies // [] | join(", ")' "$DB_FILE")
 [ -z "$DEPS" ] && DEPS="Ninguna"
 
 # ---- Nuevos campos de metadatos ----
-IS_OPEN=$(jq -r '.is_open_sorce // false' "$DB_FILE")   # tal como está en el ejemplo
+PROJECT=$(jq -r '.project // ""' "$DB_FILE")              # nuevo campo
+IS_OPEN=$(jq -r '.is_open_sorce // false' "$DB_FILE")
 SOURCE_CODE=$(jq -r '.source_code // ""' "$DB_FILE")
 ORIGIN=$(jq -r '.origin // ""' "$DB_FILE")
 DEVELOPER=$(jq -r '.developer // ""' "$DB_FILE")
@@ -146,6 +147,13 @@ echo -e " Uso:          $USAGE"
 echo -e "${GREEN}--------------------------------------------------${NC}"
 echo -e "${GREEN}📋 Metadatos${NC}"
 
+# Proyecto (nuevo)
+if [ -n "$PROJECT" ]; then
+    echo -e " Proyecto:     $PROJECT"
+else
+    echo -e " Proyecto:     ${YELLOW}(no especificado)${NC}"
+fi
+
 # Licencia
 if [ -n "$LICENSE" ]; then
     echo -e " Licencia:     $LICENSE"
@@ -187,21 +195,6 @@ elif [ -n "$COPYRIGHT_YEAR" ]; then
     echo -e " Copyright:    $COPYRIGHT_YEAR (titular no especificado)"
 else
     echo -e " Copyright:    ${YELLOW}(no especificado)${NC}"
-fi
-
-# ---- Advertencia de metadatos faltantes ----
-MISSING=()
-[ -z "$LICENSE" ] && MISSING+=("license")
-[ -z "$ORIGIN" ] && MISSING+=("origin")
-[ -z "$DEVELOPER" ] && MISSING+=("developer")
-[ -z "$COPYRIGHT_TITLE" ] && MISSING+=("copyright_title")
-[ -z "$COPYRIGHT_YEAR" ] && MISSING+=("copyright_year")
-if [ "$IS_OPEN" = "true" ] && [ -z "$SOURCE_CODE" ]; then
-    MISSING+=("source_code (open source but missing)")
-fi
-
-if [ ${#MISSING[@]} -gt 0 ]; then
-    echo -e "\n${YELLOW}⚠ Metadatos faltantes: ${MISSING[*]}${NC}"
 fi
 
 echo -e "${GREEN}==================================================${NC}"
