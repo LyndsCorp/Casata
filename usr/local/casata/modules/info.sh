@@ -12,7 +12,6 @@ NC='\033[0m'
 
 # ------------------------------------------------------------
 # Función para resolver versiones que pueden ser URLs
-# Solo se aplica al campo "version" de los metadatos JSON
 # ------------------------------------------------------------
 resolve_version() {
     local version_input="$1"
@@ -99,16 +98,24 @@ fi
 DEPS=$(jq -r '.dependencies // [] | join(", ")' "$DB_FILE")
 [ -z "$DEPS" ] && DEPS="Ninguna"
 
+# ---- Nuevos campos de metadatos ----
+IS_OPEN=$(jq -r '.is_open_sorce // false' "$DB_FILE")   # tal como está en el ejemplo
+SOURCE_CODE=$(jq -r '.source_code // ""' "$DB_FILE")
+ORIGIN=$(jq -r '.origin // ""' "$DB_FILE")
+DEVELOPER=$(jq -r '.developer // ""' "$DB_FILE")
+LICENSE=$(jq -r '.license // ""' "$DB_FILE")
+LICENSE_FILE=$(jq -r '.license_file // ""' "$DB_FILE")
+COPYRIGHT_TITLE=$(jq -r '.copyright_title // ""' "$DB_FILE")
+COPYRIGHT_YEAR=$(jq -r '.copyright_year // ""' "$DB_FILE")
+
 # Comprobar estado de instalación y versión
 STATUS_STR="${RED}No instalado${NC}"
 INSTALLED_VERSION="-"
 
 if [ -d "$APP_DIR" ]; then
     if [ -f "$APP_DIR/VERSION" ]; then
-        # Versión instalada: se lee directamente del archivo VERSION (nunca es URL)
         INSTALLED_VERSION=$(cat "$APP_DIR/VERSION")
 
-        # Comparación de versiones
         if [ "$INSTALLED_VERSION" == "$DB_VERSION" ]; then
             STATUS_STR="${GREEN}Instalado (Actualizado)${NC}"
         else
@@ -134,4 +141,67 @@ echo -e " Descripción:  $DESC"
 echo -e " Tamaño:       $SIZE"
 echo -e " Dependencias: $DEPS"
 echo -e " Uso:          $USAGE"
+
+# ---- Mostrar metadatos ----
+echo -e "${GREEN}--------------------------------------------------${NC}"
+echo -e "${GREEN}📋 Metadatos${NC}"
+
+# Licencia
+if [ -n "$LICENSE" ]; then
+    echo -e " Licencia:     $LICENSE"
+else
+    echo -e " Licencia:     ${YELLOW}(no especificada)${NC}"
+fi
+
+# Código fuente (solo si open source)
+if [ "$IS_OPEN" = "true" ] || [ "$IS_OPEN" = "1" ]; then
+    if [ -n "$SOURCE_CODE" ]; then
+        echo -e " Código fuente: $SOURCE_CODE"
+    else
+        echo -e " Código fuente: ${YELLOW}(no especificado)${NC}"
+    fi
+else
+    echo -e " Código fuente: ${RED}No es de código abierto${NC}"
+fi
+
+# Origen
+if [ -n "$ORIGIN" ]; then
+    echo -e " Origen:       $ORIGIN"
+else
+    echo -e " Origen:       ${YELLOW}(no especificado)${NC}"
+fi
+
+# Desarrollador
+if [ -n "$DEVELOPER" ]; then
+    echo -e " Desarrollador: $DEVELOPER"
+else
+    echo -e " Desarrollador: ${YELLOW}(no especificado)${NC}"
+fi
+
+# Copyright
+if [ -n "$COPYRIGHT_TITLE" ] && [ -n "$COPYRIGHT_YEAR" ]; then
+    echo -e " Copyright:    $COPYRIGHT_YEAR $COPYRIGHT_TITLE"
+elif [ -n "$COPYRIGHT_TITLE" ]; then
+    echo -e " Copyright:    $COPYRIGHT_TITLE (año no especificado)"
+elif [ -n "$COPYRIGHT_YEAR" ]; then
+    echo -e " Copyright:    $COPYRIGHT_YEAR (titular no especificado)"
+else
+    echo -e " Copyright:    ${YELLOW}(no especificado)${NC}"
+fi
+
+# ---- Advertencia de metadatos faltantes ----
+MISSING=()
+[ -z "$LICENSE" ] && MISSING+=("license")
+[ -z "$ORIGIN" ] && MISSING+=("origin")
+[ -z "$DEVELOPER" ] && MISSING+=("developer")
+[ -z "$COPYRIGHT_TITLE" ] && MISSING+=("copyright_title")
+[ -z "$COPYRIGHT_YEAR" ] && MISSING+=("copyright_year")
+if [ "$IS_OPEN" = "true" ] && [ -z "$SOURCE_CODE" ]; then
+    MISSING+=("source_code (open source but missing)")
+fi
+
+if [ ${#MISSING[@]} -gt 0 ]; then
+    echo -e "\n${YELLOW}⚠ Metadatos faltantes: ${MISSING[*]}${NC}"
+fi
+
 echo -e "${GREEN}==================================================${NC}"
