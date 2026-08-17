@@ -37,7 +37,6 @@ NC='\033[0m'
 
 # ------------------------------------------------------------
 # Función para resolver versiones que pueden ser URLs
-# Solo se aplica al campo "version" de los metadatos JSON
 # ------------------------------------------------------------
 resolve_version() {
     local version_input="$1"
@@ -910,6 +909,7 @@ install_from_file() {
     mkdir -p "$APPS_DIR"
     APP_DIR="$APPS_DIR/$PKG_NAME"
 
+    # Extraer el paquete .casata en un directorio temporal
     EXTRACT_DIR=$(mktemp -d)
 
     echo -e "${GREEN}Extrayendo $PKG_NAME desde archivo local...${NC}"
@@ -918,18 +918,43 @@ install_from_file() {
         return 1
     fi
 
-    local DATA_FILE="$SRC_DIR/DATA.json"
-    local VERSION_FILE="$SRC_DIR/VERSION"
-    local DEPS_FILE="$SRC_DIR/DEPS.json"
-
+    # Variables para metadatos
     local REPO_VERSION=""
     local SHA256=""
     local -a APT_DEPS=() PACMAN_DEPS=() DNF_DEPS=() PIP_DEPS=() CASATA_DEPS=()
+    local EXTERNAL_MODE=0
+    local RELEASE_URL=""
+    local GUIDE_ARRAY=""
 
+    # Buscar DATA.json dentro del paquete extraído
+    local DATA_FILE="$SRC_DIR/DATA.json"
     if [ -f "$DATA_FILE" ]; then
         echo -e "${YELLOW}Se encontró DATA.json, usando metadatos del paquete.${NC}"
+
+        # Leer external_metadata
+        local external_metadata
+        external_metadata=$(jq -r '.external_metadata // false' "$DATA_FILE" 2>/dev/null || echo "false")
+        if [[ "$external_metadata" == "true" ]]; then
+            EXTERNAL_MODE=1
+            echo -e "${YELLOW}Modo external_metadata activado. Se descargará el release oficial.${NC}"
+
+            # Leer release.url
+            RELEASE_URL=$(jq -r '.release.url // empty' "$DATA_FILE" 2>/dev/null || true)
+            if [ -z "$RELEASE_URL" ]; then
+                echo -e "${RED}Error: external_metadata es true pero no se encontró 'release.url'.${NC}"
+                rm -rf "$EXTRACT_DIR"
+                return 1
+            fi
+
+            # Leer guide (array)
+            GUIDE_ARRAY=$(jq -c '.guide // []' "$DATA_FILE" 2>/dev/null || echo "[]")
+            if [ "$GUIDE_ARRAY" == "[]" ]; then
+                echo -e "${YELLOW}Aviso: No se encontró 'guide' en DATA.json. No se crearán enlaces.${NC}"
+            fi
+        fi
+
+        # Leer campos comunes (version, dependencias, etc.) siempre
         REPO_VERSION=$(jq -r '.version // "0.0.0"' "$DATA_FILE" 2>/dev/null || true)
-        # El campo version de DATA.json (metadatos) puede ser URL, resolver
         if ! REPO_VERSION=$(resolve_version "$REPO_VERSION"); then
             REPO_VERSION="0.0.0"
             echo -e "${YELLOW}No se pudo resolver la versión del paquete; se asume 0.0.0.${NC}"
@@ -941,12 +966,12 @@ install_from_file() {
         split_to_array PIP_DEPS "$(jq -r '.pip? // [] | .[]' "$DATA_FILE" 2>/dev/null || true)" || true
         split_to_array CASATA_DEPS "$(jq -r '.casata? // [] | .[]' "$DATA_FILE" 2>/dev/null || true)" || true
     else
+        # Si no hay DATA.json, intentar usar base de datos global o VERSION/DEPS.json (comportamiento anterior)
         local global_json="$DATA_DIR/${PKG_NAME}.json"
         if [ -f "$global_json" ]; then
             if jq empty "$global_json" 2>/dev/null; then
                 echo -e "${YELLOW}No se encontró DATA.json. Usando metadatos de la base de datos global para '$PKG_NAME'.${NC}"
                 REPO_VERSION=$(jq -r '.version // "0.0.0"' "$global_json" 2>/dev/null || true)
-                # El campo version de metadatos globales puede ser URL, resolver
                 if ! REPO_VERSION=$(resolve_version "$REPO_VERSION"); then
                     REPO_VERSION="0.0.0"
                     echo -e "${YELLOW}No se pudo resolver la versión global; se asume 0.0.0.${NC}"
@@ -959,16 +984,17 @@ install_from_file() {
                 split_to_array CASATA_DEPS "$(jq -r '.casata? // [] | .[]' "$global_json" 2>/dev/null || true)" || true
             else
                 echo -e "${YELLOW}Advertencia: El archivo de base de datos global '$global_json' no es un JSON válido. Intentando con VERSION...${NC}"
-                if [ -f "$VERSION_FILE" ]; then
-                    # El archivo VERSION local nunca es URL, se lee directamente
-                    REPO_VERSION=$(cat "$VERSION_FILE" 2>/dev/null || true)
-                    if [ -f "$DEPS_FILE" ]; then
+                local version_file="$SRC_DIR/VERSION"
+                if [ -f "$version_file" ]; then
+                    REPO_VERSION=$(cat "$version_file" 2>/dev/null || true)
+                    local deps_file="$SRC_DIR/DEPS.json"
+                    if [ -f "$deps_file" ]; then
                         echo -e "${YELLOW}Se encontró DEPS.json, procesando dependencias...${NC}"
-                        split_to_array APT_DEPS "$(jq -r '.apt? // [] | .[]' "$DEPS_FILE" 2>/dev/null || true)" || true
-                        split_to_array PACMAN_DEPS "$(jq -r '.pacman? // [] | .[]' "$DEPS_FILE" 2>/dev/null || true)" || true
-                        split_to_array DNF_DEPS "$(jq -r '.dnf? // [] | .[]' "$DEPS_FILE" 2>/dev/null || true)" || true
-                        split_to_array PIP_DEPS "$(jq -r '.pip? // [] | .[]' "$DEPS_FILE" 2>/dev/null || true)" || true
-                        split_to_array CASATA_DEPS "$(jq -r '.casata? // [] | .[]' "$DEPS_FILE" 2>/dev/null || true)" || true
+                        split_to_array APT_DEPS "$(jq -r '.apt? // [] | .[]' "$deps_file" 2>/dev/null || true)" || true
+                        split_to_array PACMAN_DEPS "$(jq -r '.pacman? // [] | .[]' "$deps_file" 2>/dev/null || true)" || true
+                        split_to_array DNF_DEPS "$(jq -r '.dnf? // [] | .[]' "$deps_file" 2>/dev/null || true)" || true
+                        split_to_array PIP_DEPS "$(jq -r '.pip? // [] | .[]' "$deps_file" 2>/dev/null || true)" || true
+                        split_to_array CASATA_DEPS "$(jq -r '.casata? // [] | .[]' "$deps_file" 2>/dev/null || true)" || true
                     fi
                 else
                     echo -e "${RED}Error: El paquete no contiene DATA.json, VERSION, y la base de datos global es inválida.${NC}"
@@ -976,17 +1002,16 @@ install_from_file() {
                     return 1
                 fi
             fi
-        elif [ -f "$VERSION_FILE" ]; then
+        elif [ -f "$SRC_DIR/VERSION" ]; then
             echo -e "${YELLOW}No se encontró DATA.json ni base de datos global. Usando archivo VERSION y DEPS.json si existe.${NC}"
-            # El archivo VERSION local nunca es URL, se lee directamente
-            REPO_VERSION=$(cat "$VERSION_FILE" 2>/dev/null || true)
-            if [ -f "$DEPS_FILE" ]; then
+            REPO_VERSION=$(cat "$SRC_DIR/VERSION" 2>/dev/null || true)
+            if [ -f "$SRC_DIR/DEPS.json" ]; then
                 echo -e "${YELLOW}Se encontró DEPS.json, procesando dependencias...${NC}"
-                split_to_array APT_DEPS "$(jq -r '.apt? // [] | .[]' "$DEPS_FILE" 2>/dev/null || true)" || true
-                split_to_array PACMAN_DEPS "$(jq -r '.pacman? // [] | .[]' "$DEPS_FILE" 2>/dev/null || true)" || true
-                split_to_array DNF_DEPS "$(jq -r '.dnf? // [] | .[]' "$DEPS_FILE" 2>/dev/null || true)" || true
-                split_to_array PIP_DEPS "$(jq -r '.pip? // [] | .[]' "$DEPS_FILE" 2>/dev/null || true)" || true
-                split_to_array CASATA_DEPS "$(jq -r '.casata? // [] | .[]' "$DEPS_FILE" 2>/dev/null || true)" || true
+                split_to_array APT_DEPS "$(jq -r '.apt? // [] | .[]' "$SRC_DIR/DEPS.json" 2>/dev/null || true)" || true
+                split_to_array PACMAN_DEPS "$(jq -r '.pacman? // [] | .[]' "$SRC_DIR/DEPS.json" 2>/dev/null || true)" || true
+                split_to_array DNF_DEPS "$(jq -r '.dnf? // [] | .[]' "$SRC_DIR/DEPS.json" 2>/dev/null || true)" || true
+                split_to_array PIP_DEPS "$(jq -r '.pip? // [] | .[]' "$SRC_DIR/DEPS.json" 2>/dev/null || true)" || true
+                split_to_array CASATA_DEPS "$(jq -r '.casata? // [] | .[]' "$SRC_DIR/DEPS.json" 2>/dev/null || true)" || true
             fi
         else
             echo -e "${RED}Error: El paquete no contiene DATA.json, VERSION, y no se encontró en la base de datos global.${NC}"
@@ -995,13 +1020,13 @@ install_from_file() {
         fi
     fi
 
-    # Version check antes de dependencias
+    # Version check antes de instalar dependencias
     if ! version_check "$APP_DIR" "$PKG_NAME" "$REPO_VERSION" "$AUTO_YES"; then
         rm -rf "$EXTRACT_DIR"
         return 2
     fi
 
-    # Instalar dependencias
+    # Instalar dependencias (comunes para ambos modos)
     if [ "${SKIP_SYSTEM_DEPS:-0}" -eq 0 ]; then
         local -a SYSTEM_DEPS=()
         case "$PKG_MANAGER" in
@@ -1062,19 +1087,87 @@ install_from_file() {
         force_remove "$APP_DIR" "$GUIDE_TARGET"
     fi
 
-    # Mover contenido extraído
     mkdir -p "$APP_DIR"
-    (
-        shopt -s dotglob nullglob
-        files=("$SRC_DIR"/*)
-        if ((${#files[@]})); then
-            mv -- "${files[@]}" "$APP_DIR/"
+
+    # ----------------------------------------------
+    # Modo external_metadata: descargar release oficial
+    # ----------------------------------------------
+    if [ $EXTERNAL_MODE -eq 1 ]; then
+        echo -e "${GREEN}Descargando release oficial desde $RELEASE_URL...${NC}"
+        local release_tmp=$(mktemp -d)
+        local archive_name=$(basename "$RELEASE_URL" | cut -d '?' -f1)
+        local archive_path="$release_tmp/$archive_name"
+
+        if ! wget -q --show-progress -O "$archive_path" "$RELEASE_URL"; then
+            echo -e "${RED}Error al descargar el release.${NC}"
+            rm -rf "$release_tmp" "$EXTRACT_DIR"
+            return 1
         fi
-    )
+
+        echo -e "${YELLOW}Extrayendo release...${NC}"
+        if ! extract_archive "$archive_path" "$release_tmp"; then
+            echo -e "${RED}Error al extraer el release.${NC}"
+            rm -rf "$release_tmp" "$EXTRACT_DIR"
+            return 1
+        fi
+
+        # Mover contenido del release a APP_DIR
+        (
+            shopt -s dotglob nullglob
+            files=("$SRC_DIR"/*)
+            if ((${#files[@]})); then
+                mv -- "${files[@]}" "$APP_DIR/"
+            fi
+        )
+        rm -rf "$release_tmp"
+
+        # Copiar archivos adicionales del paquete .casata (excepto DATA.json) a APP_DIR
+        echo -e "${YELLOW}Copiando archivos adicionales del distribuidor...${NC}"
+        (
+            shopt -s dotglob nullglob
+            # Cambiar al directorio EXTRACT_DIR (que contiene el contenido extraído del .casata)
+            cd "$EXTRACT_DIR" || exit 1
+            for item in *; do
+                # Saltar DATA.json y cualquier otro archivo que no queramos copiar
+                if [ "$item" != "DATA.json" ] && [ "$item" != "GUIDE.json" ] && [ "$item" != "DEPS.json" ] && [ "$item" != "VERSION" ]; then
+                    if [ -e "$item" ]; then
+                        # Copiar recursivamente, sobrescribiendo
+                        cp -r -- "$item" "$APP_DIR/"
+                    fi
+                fi
+            done
+        )
+    else
+        # Modo normal: mover todo el contenido extraído del .casata a APP_DIR
+        (
+            shopt -s dotglob nullglob
+            files=("$SRC_DIR"/*)
+            if ((${#files[@]})); then
+                mv -- "${files[@]}" "$APP_DIR/"
+            fi
+        )
+    fi
+
+    # Limpiar directorio de extracción del .casata
     rm -rf "$EXTRACT_DIR"
     EXTRACT_DIR=""
 
+    # ------------------------------------------------------------
+    # Crear enlaces simbólicos según GUIDE
+    # ------------------------------------------------------------
+    # Si estamos en modo external y tenemos GUIDE_ARRAY, generar GUIDE.json
+    if [ $EXTERNAL_MODE -eq 1 ] && [ -n "$GUIDE_ARRAY" ] && [ "$GUIDE_ARRAY" != "[]" ]; then
+        echo -e "${YELLOW}Generando GUIDE.json a partir del 'guide' del DATA.json...${NC}"
+        if ! jq -n --argjson links "$GUIDE_ARRAY" '{links: $links}' > "$APP_DIR/GUIDE.json"; then
+            echo -e "${RED}Error al generar GUIDE.json.${NC}"
+            return 1
+        fi
+    fi
+
+    # Crear enlaces (si existe GUIDE.json en APP_DIR)
     create_symlinks "$APP_DIR" "$GUIDE_TARGET" "$PKG_NAME" "$AUTO_YES"
+
+    # Ejecutar GUIDE.sh si el paquete está en la lista de prioridad
     maybe_run_guide "$PKG_NAME" "$APP_DIR" "$AUTO_YES" "$REPO_VERSION"
 
     echo -e "${GREEN}¡$PKG_NAME instalado correctamente! (versión $REPO_VERSION)${NC}"
