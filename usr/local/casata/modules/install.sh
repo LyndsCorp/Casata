@@ -3,7 +3,7 @@
 # /usr/local/casata/modules/install.sh
 # Copyright (C) 2026 David Baña Szymaniak
 # GPL v3 License
-# Script de instalar aplicaciones en Casata 1.3.6
+# Script de instalar aplicaciones en Casata
 
 shopt -s nullglob
 set -euo pipefail
