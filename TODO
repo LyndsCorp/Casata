@@ -16,7 +16,7 @@
     casata download --extract (o -e), descomprime el paquete y elimina el paquete comprimido.
     El archivo se decarga como FILENAME.casata, manteniendo su extensión original tambien (ej. app.tar.gz.casata)
 
-[ ] Que los metadatos de paquetes puedan tener el VERSION como una URL para solo tener que modificar el archivo VERSION del paquete.
+[X] Que los metadatos de paquetes puedan tener el VERSION como una URL para solo tener que modificar el archivo VERSION del paquete.
     Para distinguir, que mire las primeras 4 letras y si son "http" en vez de números, entonces es una URL.
 
 [ ] Para facilitar la distribución de paquetes de terceros sin necesidad de hacer un fork o cosas así, que los metadatos puedan tener un campo que si es true, entonces Casata no va a utilizar metadatos en el paquete, sino todo del JSON del data.
