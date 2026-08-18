@@ -1,6 +1,5 @@
 #!/bin/bash
 # /usr/local/casata/modules/history.sh
-# Copyright (C) 2026 David Baña Szymaniak
 
 CASATA_ROOT="/usr/local/casata"
 RED='\033[0;31m'
@@ -26,6 +25,8 @@ Opciones:
   --type <tipo>         Filtrar por tipo (p. ej. PAQUETE_INSTALADO, ENLACE_CREADO, etc.)
   --search <texto>      Buscar texto en las líneas
   --lines N             Mostrar solo las N entradas más recientes
+  --exited              Mostrar también la salida capturada de los comandos.
+                        Por defecto se oculta para no saturar el historial.
   --disable             Desactivar el registro de historial
   --enable              Reactivar el registro de historial
   --clear               Limpiar el historial (pide confirmación)
@@ -112,6 +113,7 @@ DATE_SPEC=""
 TYPE_SPEC=""
 SEARCH_SPEC=""
 LINES=""
+SHOW_EXITED=0
 DISABLE=0; ENABLE=0; CLEAR=0; SHOW_HELP=0
 
 while [[ $# -gt 0 ]]; do
@@ -140,6 +142,10 @@ while [[ $# -gt 0 ]]; do
         --lines)
             LINES="$2"
             shift 2
+            ;;
+        --exited|--exit|--salida)
+            SHOW_EXITED=1
+            shift
             ;;
         --disable)
             DISABLE=1; shift ;;
@@ -234,22 +240,42 @@ fi
 # Mostrar historial aplicando filtros de forma segura
 {
     count=0
+    in_output=0
+
     while IFS= read -r line; do
-        # Filtro por tipo
+        # Detectar inicio de un bloque de salida
+        if [[ "$line" == *"📤 Salida de "* ]] || [[ "$line" == *"⚠️ Errores de "* ]]; then
+            in_output=1
+            if [ $SHOW_EXITED -eq 0 ]; then
+                continue
+            fi
+        fi
+
+        # Si estamos dentro de un bloque de salida y no queremos mostrarla, saltarla
+        if [ $SHOW_EXITED -eq 0 ] && [ $in_output -eq 1 ]; then
+            if [[ "$line" =~ ^[[:space:]]+ ]]; then
+                # Línea indentada de salida, omitir
+                continue
+            else
+                # El bloque terminó, volver al estado normal
+                in_output=0
+            fi
+        fi
+
+        # Aplicar filtros normales
         if [ -n "$TYPE_SPEC" ] && [[ "$line" != *"[$TYPE_SPEC]"* ]]; then
             continue
         fi
 
-        # Filtro por texto
         if [ -n "$SEARCH_SPEC" ] && [[ "$line" != *"$SEARCH_SPEC"* ]]; then
             continue
         fi
 
-        # Filtro por fecha (formato [YYYY-MM-DD ...)
         if [ -n "$NORMALIZED_DATE" ] && [[ "$line" != \[$NORMALIZED_DATE\ * ]]; then
             continue
         fi
 
+        # Mostrar la línea
         echo "$line"
         count=$((count + 1))
 
