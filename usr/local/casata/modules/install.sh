@@ -19,6 +19,10 @@ SINGREPOS_PRIORITY="$GLOBAL_ROOT/repos/singrepos/PRIORITY"
 OS_PACKAGES_FILE="$GLOBAL_ROOT/OS_PACKAGES"
 CASATA_DEP_CACHE="/tmp/casata-deps-$$"
 
+# Directorio temporal para descargas y extracción
+TEMP_BASE="/tmp/casata"
+mkdir -p "$TEMP_BASE"
+
 # ------------------------------------------------------------
 # Variables de control para instalación por lotes
 # ------------------------------------------------------------
@@ -64,6 +68,25 @@ resolve_version() {
         fi
     else
         echo "$version_input"
+    fi
+}
+
+# ------------------------------------------------------------
+# Obtener extensión del archivo remoto (compuesta o simple)
+# ------------------------------------------------------------
+get_file_extension() {
+    local url="$1"
+    local filename
+    filename=$(basename "$url" | cut -d '?' -f1)
+    local lower
+    lower=$(printf '%s' "$filename" | tr '[:upper:]' '[:lower:]')
+
+    if [[ "$lower" =~ \.(tar\.gz|tar\.xz|tar\.bz2|tgz|txz|tbz2)$ ]]; then
+        printf '%s' "${BASH_REMATCH[1]}"
+    elif [[ "$lower" =~ \.([a-z0-9]+)$ ]]; then
+        printf '%s' "${BASH_REMATCH[1]}"
+    else
+        printf ''
     fi
 }
 
@@ -516,39 +539,38 @@ force_remove() {
     safe_rm_rf "$app_dir"
 }
 
-ask_overwrite() {
-    local target="$1"
-    local app_name="$2"
-    local auto_yes="$3"
+# ------------------------------------------------------------
+# Mostrar resumen de lo que se eliminará
+# ------------------------------------------------------------
+show_removal_summary() {
+    local app_dir="$1"
+    local guide_target="$2"
 
-    if [ "$auto_yes" -eq 1 ]; then
-        if [ -L "$target" ] || [ -f "$target" ]; then
-            rm -f -- "$target"
-            return 0
-        else
-            echo -e "${RED}Error: '$target' es un directorio y no se puede sobrescribir.${NC}"
-            return 1
-        fi
-    fi
+    echo -e "${YELLOW}Resumen de cambios que se realizarán:${NC}"
 
-    echo -e "${YELLOW}Advertencia: '$target' ya existe y no es un enlace a $app_name.${NC}"
-    read -p "¿Sobrescribirlo? (perderás el archivo original) [s/N/a (abortar)]: " resp < /dev/tty
-    if [[ "$resp" =~ ^[sSyY] ]]; then
-        if [ -L "$target" ] || [ -f "$target" ]; then
-            rm -f -- "$target"
-            echo -e "${GREEN}Archivo eliminado. Continuando...${NC}"
-            return 0
-        else
-            echo -e "${RED}Error: '$target' es un directorio y no se puede sobrescribir.${NC}"
-            return 1
-        fi
-    elif [[ "$resp" =~ ^[aA] ]]; then
-        echo -e "${RED}Instalación abortada por el usuario.${NC}"
-        exit 1
+    if [ -f "$app_dir/$guide_target" ]; then
+        echo -e "  ${RED}Enlaces a eliminar:${NC}"
+        jq -c '.links[]' "$app_dir/$guide_target" 2>/dev/null | while read -r item; do
+            DEST=$(echo "$item" | jq -r '.dest')
+            LINK_NAME=$(echo "$item" | jq -r '.name')
+            FILE=$(echo "$item" | jq -r '.file')
+            [ "$DEST" == "null" ] || [ "$LINK_NAME" == "null" ] || [ "$FILE" == "null" ] && continue
+            DEST="${DEST/#\~/$HOME}"
+            DEST="${DEST//\$HOME/$HOME}"
+            TARGET_LINK="$DEST/$LINK_NAME"
+            if [ -L "$TARGET_LINK" ]; then
+                echo -e "    - $LINK_NAME -> $TARGET_LINK"
+            elif [ -e "$TARGET_LINK" ]; then
+                echo -e "    - $LINK_NAME (archivo existente, no enlace)"
+            else
+                echo -e "    - $LINK_NAME (no existe)"
+            fi
+        done
     else
-        echo -e "${YELLOW}Omitiendo enlace. No se sobrescribirá.${NC}"
-        return 1
+        echo -e "  ${YELLOW}No se encontró GUIDE.json, no se eliminarán enlaces.${NC}"
     fi
+
+    echo -e "  ${RED}Carpeta de aplicación a eliminar:${NC} $app_dir"
 }
 
 # ------------------------------------------------------------
@@ -592,6 +614,7 @@ download_external_files() {
         [ -z "$url" ] && continue
         counter=$((counter+1))
 
+        # Limpiar query string y obtener el nombre de archivo
         local clean_url="${url%%\?*}"
         local filename
         filename=$(basename "$clean_url" 2>/dev/null || true)
@@ -904,35 +927,43 @@ install_one() {
         fi
     fi
 
-    # Eliminar instalación anterior después de aceptar
-    if [ -d "$APP_DIR" ]; then
-        echo -e "${YELLOW}Preparando actualización/reinstalación...${NC}"
-        force_remove "$APP_DIR" "$GUIDE_TARGET"
+    # ------------------------------------------------------------
+    # Descargar y extraer a directorio temporal
+    # ------------------------------------------------------------
+    local temp_download_dir="$TEMP_BASE/install-$$"
+    mkdir -p "$temp_download_dir"
+
+    # Obtener extensión del archivo remoto
+    local remote_ext
+    remote_ext="$(get_file_extension "$DOWNLOAD_URL")"
+    if [ -z "$remote_ext" ]; then
+        echo -e "${RED}Error: No se pudo determinar la extensión del archivo remoto.${NC}"
+        rm -rf "$temp_download_dir"
+        return 1
     fi
 
-    mkdir -p "$APP_DIR"
-    ARCHIVE_NAME=$(basename "$DOWNLOAD_URL" | cut -d '?' -f1)
-    ARCHIVE_PATH="$APP_DIR/$ARCHIVE_NAME"
-    EXTRACT_DIR=$(mktemp -d)
+    # Nombre del archivo descargado: nombre-paquete.extension-remota.casata
+    local final_filename="${PKG_NAME}.${remote_ext}.casata"
+    local ARCHIVE_PATH="$temp_download_dir/$final_filename"
 
-    # Confirmación antes de descargar
-    if [ "$AUTO_YES" -eq 0 ]; then
-        echo -e "${YELLOW}Se descargará e instalará $PKG_NAME (versión $REPO_VERSION).${NC}"
+    echo -e "${YELLOW}Se descargará e instalará $PKG_NAME (versión $REPO_VERSION).${NC}"
+    if [ $AUTO_YES -eq 0 ]; then
         read -p "¿Deseas continuar? [S/n] " resp < /dev/tty
         if [[ ! "$resp" =~ ^[SsYy]?$ ]]; then
             echo -e "${YELLOW}Instalación cancelada.${NC}"
+            rm -rf "$temp_download_dir"
             return 2
         fi
     fi
 
     echo -e "${GREEN}Descargando $PKG_NAME...${NC}"
-    if wget -q --show-progress -O "$ARCHIVE_PATH" "$DOWNLOAD_URL"; then
-        log_download "$DOWNLOAD_URL" "$ARCHIVE_PATH" "OK"
-    else
-        log_download "$DOWNLOAD_URL" "$ARCHIVE_PATH" "ERROR"
+    wget -q --show-progress -O "$ARCHIVE_PATH" "$DOWNLOAD_URL" || {
         echo -e "${RED}Error descarga.${NC}"
+        log_download "$DOWNLOAD_URL" "$ARCHIVE_PATH" "ERROR"
+        rm -rf "$temp_download_dir"
         return 1
-    fi
+    }
+    log_download "$DOWNLOAD_URL" "$ARCHIVE_PATH" "OK"
 
     if [ -n "$SHA256" ]; then
         echo -e "${YELLOW}Verificando integridad del archivo...${NC}"
@@ -942,13 +973,44 @@ install_one() {
         else
             echo -e "${RED}Error: La suma SHA256 no coincide. El archivo podría estar corrupto.${NC}"
             log_sha256 "$ARCHIVE_PATH" "ERROR"
-            rm -f "$ARCHIVE_PATH"
+            rm -rf "$temp_download_dir"
             return 1
         fi
     fi
 
-    extract_archive "$ARCHIVE_PATH" "$EXTRACT_DIR" || { rm -rf "$EXTRACT_DIR"; return 1; }
+    # Extraer
+    local extract_dir="$temp_download_dir/extract"
+    mkdir -p "$extract_dir"
+    if ! extract_archive "$ARCHIVE_PATH" "$extract_dir"; then
+        echo -e "${RED}Error al extraer el archivo.${NC}"
+        rm -rf "$temp_download_dir"
+        return 1
+    fi
 
+    # Verificar que se extrajo contenido
+    if [ -z "$SRC_DIR" ] || [ ! -d "$SRC_DIR" ]; then
+        echo -e "${RED}Error: No se pudo determinar el contenido del paquete.${NC}"
+        rm -rf "$temp_download_dir"
+        return 1
+    fi
+
+    # Mostrar resumen de cambios si ya existe una versión anterior
+    if [ -d "$APP_DIR" ]; then
+        show_removal_summary "$APP_DIR" "$GUIDE_TARGET"
+        if [ $AUTO_YES -eq 0 ]; then
+            read -p "¿Deseas reemplazar la versión actual? [S/n] " resp < /dev/tty
+            if [[ ! "$resp" =~ ^[SsYy]?$ ]]; then
+                echo -e "${YELLOW}Instalación cancelada.${NC}"
+                rm -rf "$temp_download_dir"
+                return 2
+            fi
+        fi
+        # Ahora sí eliminar la versión anterior
+        force_remove "$APP_DIR" "$GUIDE_TARGET"
+    fi
+
+    # Mover archivos extraídos al directorio final
+    mkdir -p "$APP_DIR"
     (
         shopt -s dotglob nullglob
         files=("$SRC_DIR"/*)
@@ -956,8 +1018,10 @@ install_one() {
             mv -- "${files[@]}" "$APP_DIR/"
         fi
     )
-    rm -rf "$EXTRACT_DIR" "$ARCHIVE_PATH"
-    EXTRACT_DIR=""
+
+    # Limpiar temporales
+    rm -rf "$temp_download_dir"
+    unset extract_dir temp_download_dir
 
     # Descargar archivos externos si los hay
     if [ ${#EXTERNAL_FILES[@]} -gt 0 ]; then
@@ -999,14 +1063,20 @@ install_from_file() {
     mkdir -p "$APPS_DIR"
     APP_DIR="$APPS_DIR/$PKG_NAME"
 
-    EXTRACT_DIR=$(mktemp -d)
+    # Extraer el paquete .casata en un directorio temporal
+    local temp_download_dir="$TEMP_BASE/install-file-$$"
+    mkdir -p "$temp_download_dir"
+    local extract_dir="$temp_download_dir/extract"
+    mkdir -p "$extract_dir"
 
     echo -e "${GREEN}Extrayendo $PKG_NAME desde archivo local...${NC}"
-    if ! extract_archive "$ARCHIVE_FILE" "$EXTRACT_DIR"; then
-        rm -rf "$EXTRACT_DIR"
+    if ! extract_archive "$ARCHIVE_FILE" "$extract_dir"; then
+        echo -e "${RED}Error al extraer el archivo.${NC}"
+        rm -rf "$temp_download_dir"
         return 1
     fi
 
+    # Variables para metadatos
     local REPO_VERSION=""
     local SHA256=""
     local -a APT_DEPS=() PACMAN_DEPS=() DNF_DEPS=() PIP_DEPS=() CASATA_DEPS=()
@@ -1015,6 +1085,7 @@ install_from_file() {
     local RELEASE_URL=""
     local GUIDE_ARRAY=""
 
+    # Buscar DATA.json dentro del paquete extraído
     local DATA_FILE="$SRC_DIR/DATA.json"
     if [ -f "$DATA_FILE" ]; then
         echo -e "${YELLOW}Se encontró DATA.json, usando metadatos del paquete.${NC}"
@@ -1028,7 +1099,7 @@ install_from_file() {
             RELEASE_URL=$(jq -r '.release.url // empty' "$DATA_FILE" 2>/dev/null || true)
             if [ -z "$RELEASE_URL" ]; then
                 echo -e "${RED}Error: external_metadata es true pero no se encontró 'release.url'.${NC}"
-                rm -rf "$EXTRACT_DIR"
+                rm -rf "$temp_download_dir"
                 return 1
             fi
 
@@ -1084,7 +1155,7 @@ install_from_file() {
                     fi
                 else
                     echo -e "${RED}Error: El paquete no contiene DATA.json, VERSION, y la base de datos global es inválida.${NC}"
-                    rm -rf "$EXTRACT_DIR"
+                    rm -rf "$temp_download_dir"
                     return 1
                 fi
             fi
@@ -1102,16 +1173,18 @@ install_from_file() {
             fi
         else
             echo -e "${RED}Error: El paquete no contiene DATA.json, VERSION, y no se encontró en la base de datos global.${NC}"
-            rm -rf "$EXTRACT_DIR"
+            rm -rf "$temp_download_dir"
             return 1
         fi
     fi
 
+    # Version check antes de instalar dependencias
     if ! version_check "$APP_DIR" "$PKG_NAME" "$REPO_VERSION" "$AUTO_YES"; then
-        rm -rf "$EXTRACT_DIR"
+        rm -rf "$temp_download_dir"
         return 2
     fi
 
+    # Instalar dependencias (comunes para ambos modos)
     if [ "${SKIP_SYSTEM_DEPS:-0}" -eq 0 ]; then
         local -a SYSTEM_DEPS=()
         case "$PKG_MANAGER" in
@@ -1128,10 +1201,10 @@ install_from_file() {
                 if [[ "$resp" =~ ^[Nn] ]]; then
                     echo -e "${YELLOW}Se omitió la instalación de dependencias del sistema.${NC}"
                 else
-                    install_system_deps SYSTEM_DEPS || { rm -rf "$EXTRACT_DIR"; return 1; }
+                    install_system_deps SYSTEM_DEPS || { rm -rf "$temp_download_dir"; return 1; }
                 fi
             else
-                install_system_deps SYSTEM_DEPS || { rm -rf "$EXTRACT_DIR"; return 1; }
+                install_system_deps SYSTEM_DEPS || { rm -rf "$temp_download_dir"; return 1; }
             fi
         fi
     fi
@@ -1144,10 +1217,10 @@ install_from_file() {
             if [[ "$resp" =~ ^[Nn] ]]; then
                 echo -e "${YELLOW}Se omitió la instalación de dependencias pip.${NC}"
             else
-                install_pip_deps PIP_DEPS || { rm -rf "$EXTRACT_DIR"; return 1; }
+                install_pip_deps PIP_DEPS || { rm -rf "$temp_download_dir"; return 1; }
             fi
         else
-            install_pip_deps PIP_DEPS || { rm -rf "$EXTRACT_DIR"; return 1; }
+            install_pip_deps PIP_DEPS || { rm -rf "$temp_download_dir"; return 1; }
         fi
     fi
 
@@ -1159,48 +1232,58 @@ install_from_file() {
             if [[ "$resp" =~ ^[Nn] ]]; then
                 echo -e "${YELLOW}Se omitió la instalación de dependencias Casata.${NC}"
             else
-                install_casata_deps CASATA_DEPS "$AUTO_YES" || { rm -rf "$EXTRACT_DIR"; return 1; }
+                install_casata_deps CASATA_DEPS "$AUTO_YES" || { rm -rf "$temp_download_dir"; return 1; }
             fi
         else
-            install_casata_deps CASATA_DEPS "$AUTO_YES" || { rm -rf "$EXTRACT_DIR"; return 1; }
+            install_casata_deps CASATA_DEPS "$AUTO_YES" || { rm -rf "$temp_download_dir"; return 1; }
         fi
     fi
 
+    # Si ya existe una versión anterior, mostrar resumen y pedir confirmación
     if [ -d "$APP_DIR" ]; then
-        echo -e "${YELLOW}Preparando actualización/reinstalación...${NC}"
-        force_remove "$APP_DIR" "$GUIDE_TARGET"
-    fi
-
-    mkdir -p "$APP_DIR"
-
-    if [ $EXTERNAL_MODE -eq 1 ]; then
-        if [ "$AUTO_YES" -eq 0 ]; then
-            echo -e "${YELLOW}Se descargará el release oficial desde $RELEASE_URL.${NC}"
-            read -p "¿Deseas continuar? [S/n] " resp < /dev/tty
+        show_removal_summary "$APP_DIR" "$GUIDE_TARGET"
+        if [ $AUTO_YES -eq 0 ]; then
+            read -p "¿Deseas reemplazar la versión actual? [S/n] " resp < /dev/tty
             if [[ ! "$resp" =~ ^[SsYy]?$ ]]; then
                 echo -e "${YELLOW}Instalación cancelada.${NC}"
-                rm -rf "$EXTRACT_DIR"
+                rm -rf "$temp_download_dir"
                 return 2
             fi
         fi
+        force_remove "$APP_DIR" "$GUIDE_TARGET"
+    fi
+
+    # Mover archivos extraídos al directorio final
+    mkdir -p "$APP_DIR"
+
+    if [ $EXTERNAL_MODE -eq 1 ]; then
+        # Descargar release externo a temp y extraer
+        local release_tmp="$temp_download_dir/release"
+        mkdir -p "$release_tmp"
+
+        # Obtener extensión del release oficial
+        local release_ext
+        release_ext="$(get_file_extension "$RELEASE_URL")"
+        if [ -z "$release_ext" ]; then
+            echo -e "${RED}Error: No se pudo determinar la extensión del release.${NC}"
+            rm -rf "$temp_download_dir"
+            return 1
+        fi
+        local final_release_filename="${PKG_NAME}.${release_ext}.casata"
+        local archive_path="$release_tmp/$final_release_filename"
 
         echo -e "${GREEN}Descargando release oficial desde $RELEASE_URL...${NC}"
-        local release_tmp=$(mktemp -d)
-        local archive_name=$(basename "$RELEASE_URL" | cut -d '?' -f1)
-        local archive_path="$release_tmp/$archive_name"
-
         if ! wget -q --show-progress -O "$archive_path" "$RELEASE_URL"; then
             echo -e "${RED}Error al descargar el release.${NC}"
             log_download "$RELEASE_URL" "$archive_path" "ERROR"
-            rm -rf "$release_tmp" "$EXTRACT_DIR"
+            rm -rf "$temp_download_dir"
             return 1
         fi
         log_download "$RELEASE_URL" "$archive_path" "OK"
 
-        echo -e "${YELLOW}Extrayendo release...${NC}"
         if ! extract_archive "$archive_path" "$release_tmp"; then
             echo -e "${RED}Error al extraer el release.${NC}"
-            rm -rf "$release_tmp" "$EXTRACT_DIR"
+            rm -rf "$temp_download_dir"
             return 1
         fi
 
@@ -1213,10 +1296,11 @@ install_from_file() {
         )
         rm -rf "$release_tmp"
 
+        # Copiar archivos adicionales del distribuidor (del extraído .casata)
         echo -e "${YELLOW}Copiando archivos adicionales del distribuidor...${NC}"
         (
             shopt -s dotglob nullglob
-            cd "$EXTRACT_DIR" || exit 1
+            cd "$extract_dir" || exit 1
             for item in *; do
                 if [ "$item" != "DATA.json" ] && [ "$item" != "GUIDE.json" ] && [ "$item" != "DEPS.json" ] && [ "$item" != "VERSION" ]; then
                     if [ -e "$item" ]; then
@@ -1226,6 +1310,7 @@ install_from_file() {
             done
         )
     else
+        # Modo normal: mover todo el contenido extraído
         (
             shopt -s dotglob nullglob
             files=("$SRC_DIR"/*)
@@ -1235,13 +1320,16 @@ install_from_file() {
         )
     fi
 
-    rm -rf "$EXTRACT_DIR"
-    EXTRACT_DIR=""
+    # Limpiar temporales
+    rm -rf "$temp_download_dir"
+    unset extract_dir temp_download_dir
 
+    # Descargar archivos externos si los hay
     if [ ${#EXTERNAL_FILES[@]} -gt 0 ]; then
         download_external_files "$APP_DIR" EXTERNAL_FILES || return 1
     fi
 
+    # Generar GUIDE.json si es necesario
     if [ $EXTERNAL_MODE -eq 1 ] && [ -n "$GUIDE_ARRAY" ] && [ "$GUIDE_ARRAY" != "[]" ]; then
         echo -e "${YELLOW}Generando GUIDE.json a partir del 'guide' del DATA.json...${NC}"
         if ! jq -n --argjson links "$GUIDE_ARRAY" '{links: $links}' > "$APP_DIR/GUIDE.json"; then
