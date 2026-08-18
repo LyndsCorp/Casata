@@ -1,4 +1,4 @@
-[ ] Que el HISTORY.txt sea muchisimo más completo, diciendo usuarios, resultados, dependencias instaladas, comandos ejecutados, links creados... y todo eso. Basicamente una capsula del tiempo. 
+[X] Que el HISTORY.txt sea muchisimo más completo, diciendo usuarios, resultados, dependencias instaladas, comandos ejecutados, links creados... y todo eso. Basicamente una capsula del tiempo.
 
 [X] Que instalar más de un paquete a la vez resuelva las dependencias primero y luego instale todos los paquetes a la vez, en vez de instalarlos en orden y ejecutar varios apt update y apt install en la misma ejecución de Casata.
 
