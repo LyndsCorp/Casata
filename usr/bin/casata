@@ -34,6 +34,7 @@ require_root() {
     fi
 }
 
+# Función para ejecutar un módulo capturando su salida sin romper la barra de progreso
 run_module() {
     local module_script="$MODULES_DIR/$1"
     shift
@@ -51,18 +52,53 @@ run_module() {
     tmp_output="$(mktemp)"
 
     set +e
-    bash "$module_script" "$@" 2>&1 | tee "$tmp_output"
-    local code=${PIPESTATUS[0]}
+    if command -v script &>/dev/null; then
+        # Construir línea de comando correctamente escapada
+        local cmd_line="bash $(printf '%q' "$module_script")"
+        for arg in "$@"; do
+            cmd_line+=" $(printf '%q' "$arg")"
+        done
+
+        # Ejecutar dentro de 'script' para emular TTY (wget mostrará barra)
+        script -q -c "$cmd_line" "$tmp_output"
+    else
+        # Fallback sin captura TTY (la barra se degradará a puntos)
+        bash "$module_script" "$@" >"$tmp_output" 2>&1
+    fi
+    local code=$?
     set -e
 
-    local combined_output
-    combined_output="$(cat "$tmp_output" 2>/dev/null)"
+    # Procesar el archivo temporal para eliminar códigos ANSI, retornos de carro y líneas de progreso repetidas
+    local clean_output
+    if [ -s "$tmp_output" ]; then
+        clean_output="$(sed -r 's/\x1B\[[0-9;]*[mK]//g; s/\r/\n/g' "$tmp_output" \
+            | sed '/^[[:space:]]*$/d' \
+            | awk '
+                {
+                    if ($0 ~ /% /) {
+                        last_progress = $0
+                    } else {
+                        if (last_progress != "") {
+                            print last_progress
+                            last_progress = ""
+                        }
+                        print $0
+                    }
+                }
+                END {
+                    if (last_progress != "") print last_progress
+                }')"
+    else
+        clean_output=""
+    fi
     rm -f "$tmp_output"
 
-    # Registrar salida y errores (combinados)
-    log_output "$FULL_COMMAND" "$combined_output"
-    if [ $code -ne 0 ]; then
-        log_error_output "$FULL_COMMAND" "$combined_output"
+    # Guardar en el historial la salida limpia (si no está vacía)
+    if [ -n "$clean_output" ]; then
+        log_output "$FULL_COMMAND" "$clean_output"
+        if [ $code -ne 0 ]; then
+            log_error_output "$FULL_COMMAND" "$clean_output"
+        fi
     fi
 
     log_command_end $code "$FULL_COMMAND"
@@ -96,6 +132,7 @@ case "$COMMAND" in
     --help|--h|-h|ayuda|--ayuda|help|--help|-ayuda) COMMAND="--help" ;;
 esac
 
+# Guardar el comando completo para el log (después de normalización)
 FULL_COMMAND="$COMMAND $*"
 
 case "$COMMAND" in
