@@ -99,7 +99,12 @@ chmod +x /usr/bin/casata
 # Reemplazar módulos
 rm -rf "$GLOBAL_ROOT/modules"
 cp -r "$EXTRACTED/usr/local/casata/modules" "$GLOBAL_ROOT/"
-chmod +x "$GLOBAL_ROOT"/modules/*.sh
+
+# Reemplazar librerias
+rm -rf "$GLOBAL_ROOT/lib"
+chmod +x "$GLOBAL_ROOT"/lib/*.sh
+cp -r "$EXTRACTED/usr/local/casata/lib" "$GLOBAL_ROOT/"
+chmod +x "$GLOBAL_ROOT"/lib/*.sh
 
 # Copiar archivos informativos
 cp -f "$EXTRACTED/usr/local/casata/"{HELP,VERSION,WELCOME,SAVE_FILES.txt} "$GLOBAL_ROOT/" 2>/dev/null
