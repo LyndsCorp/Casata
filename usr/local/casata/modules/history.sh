@@ -1,6 +1,5 @@
 #!/bin/bash
 # /usr/local/casata/modules/history.sh
-
 # Copyright (C) 2026 David Baña Szymaniak
 
 CASATA_ROOT="/usr/local/casata"
@@ -18,16 +17,19 @@ show_help() {
 Uso: casata history [OPCIONES]
 
 Opciones:
-  --date <fecha>      Ver solo entradas de una fecha (DD-MM-YYYY o D-M-YYYY)
-  --user [nombre]     Ver historial de un usuario. Sin nombre usa el actual.
-                      Por defecto se muestra el historial global/root.
-  --type <tipo>       Filtrar por tipo (p. ej. PAQUETE_INSTALADO, ENLACE_CREADO, etc.)
-  --search <texto>    Buscar texto en las líneas
-  --lines N           Mostrar solo las N entradas más recientes
-  --disable           Desactivar el registro de historial
-  --enable            Reactivar el registro de historial
-  --clear             Limpiar el historial (pide confirmación)
-  --help              Mostrar esta ayuda
+  --date <fecha|alias>  Ver solo entradas de una fecha o alias.
+                        Fecha: DD-MM-YYYY o D-M-YYYY.
+                        Alias: hoy, ayer, anteayer, lunes, martes, ...
+                               today, yesterday, monday, tuesday, ...
+  --user [nombre]       Ver historial de un usuario. Sin nombre usa el actual.
+                        Por defecto se muestra el historial global/root.
+  --type <tipo>         Filtrar por tipo (p. ej. PAQUETE_INSTALADO, ENLACE_CREADO, etc.)
+  --search <texto>      Buscar texto en las líneas
+  --lines N             Mostrar solo las N entradas más recientes
+  --disable             Desactivar el registro de historial
+  --enable              Reactivar el registro de historial
+  --clear               Limpiar el historial (pide confirmación)
+  --help                Mostrar esta ayuda
 
 Sin opciones, muestra el historial global (de root) del más reciente al más antiguo.
 EOF
@@ -47,6 +49,48 @@ normalize_date() {
         return 1
     fi
     echo "${year}-${month}-${day}"
+}
+
+# Resolver alias de día a DD-MM-YYYY
+resolve_day_alias() {
+    local input="$1"
+    input=$(echo "$input" | tr '[:upper:]' '[:lower:]')
+
+    case "$input" in
+        hoy|today)
+            date +%d-%m-%Y
+            return 0
+            ;;
+        ayer|yesterday)
+            date -d "1 day ago" +%d-%m-%Y
+            return 0
+            ;;
+        anteayer)
+            date -d "2 days ago" +%d-%m-%Y
+            return 0
+            ;;
+    esac
+
+    local day_num
+    case "$input" in
+        sunday|domingo)            day_num=0 ;;
+        monday|lunes)              day_num=1 ;;
+        tuesday|martes)            day_num=2 ;;
+        wednesday|miércoles|miercoles) day_num=3 ;;
+        thursday|jueves)           day_num=4 ;;
+        friday|viernes)            day_num=5 ;;
+        saturday|sábado|sabado)    day_num=6 ;;
+        *) return 1 ;;
+    esac
+
+    local today_epoch=$(date +%s)
+    local today_wday=$(date +%w)   # 0=domingo, 1=lunes, ... 6=sábado
+    local target_wday=$day_num
+
+    local days_ago=$(( (today_wday - target_wday + 7) % 7 ))
+    local target_epoch=$(( today_epoch - days_ago * 86400 ))
+    date -d "@$target_epoch" +%d-%m-%Y
+    return 0
 }
 
 show_with_pager() {
@@ -161,12 +205,18 @@ if [ ! -f "$TARGET_LOG" ]; then
     exit 0
 fi
 
-# Normalizar fecha si se especificó
+# Procesar fecha: si es alias, obtener la fecha real
 NORMALIZED_DATE=""
 if [ -n "$DATE_SPEC" ]; then
+    # Intentar primero como alias
+    RESOLVED_ALIAS="$(resolve_day_alias "$DATE_SPEC" 2>/dev/null || true)"
+    if [ -n "$RESOLVED_ALIAS" ]; then
+        DATE_SPEC="$RESOLVED_ALIAS"
+    fi
+
     NORMALIZED_DATE="$(normalize_date "$DATE_SPEC")"
     if [ -z "$NORMALIZED_DATE" ]; then
-        echo -e "${RED}Error: Fecha inválida '$DATE_SPEC'. Use DD-MM-YYYY.${NC}"
+        echo -e "${RED}Error: Fecha inválida '$DATE_SPEC'. Use DD-MM-YYYY o un alias (hoy, ayer, lunes, ...).${NC}"
         exit 1
     fi
 fi
@@ -182,31 +232,27 @@ if [ -n "$LINES" ]; then
 fi
 
 # Mostrar historial aplicando filtros de forma segura
-# Se lee línea por línea y se filtran por tipo, búsqueda y fecha.
-# El orden es el del archivo (más reciente arriba).
 {
     count=0
     while IFS= read -r line; do
-        # Aplicar filtro por tipo (búsqueda exacta de la etiqueta)
+        # Filtro por tipo
         if [ -n "$TYPE_SPEC" ] && [[ "$line" != *"[$TYPE_SPEC]"* ]]; then
             continue
         fi
 
-        # Aplicar filtro por texto (búsqueda literal)
+        # Filtro por texto
         if [ -n "$SEARCH_SPEC" ] && [[ "$line" != *"$SEARCH_SPEC"* ]]; then
             continue
         fi
 
-        # Aplicar filtro por fecha (formato [YYYY-MM-DD ...)
+        # Filtro por fecha (formato [YYYY-MM-DD ...)
         if [ -n "$NORMALIZED_DATE" ] && [[ "$line" != \[$NORMALIZED_DATE\ * ]]; then
             continue
         fi
 
-        # Si la línea pasa todos los filtros, mostrarla
         echo "$line"
         count=$((count + 1))
 
-        # Si hay límite y ya lo alcanzamos, salir del bucle
         if [ "$LIMIT" -gt 0 ] && [ "$count" -ge "$LIMIT" ]; then
             break
         fi
