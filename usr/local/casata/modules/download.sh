@@ -9,7 +9,14 @@
 #                        o ~/Descargas.
 #   -h, --help           Mostrar esta ayuda.
 
+# Copyright (C) 2026 David Baña Szymaniak
+
 set -euo pipefail
+
+# Cargar librería de historial
+if [ -f "/usr/local/casata/lib/history-lib.sh" ]; then
+    source "/usr/local/casata/lib/history-lib.sh"
+fi
 
 CASATA_ROOT="/usr/local/casata"
 SINGREPOS_DIR="$CASATA_ROOT/repos/singrepos"
@@ -203,16 +210,19 @@ download_one() {
     if ! wget -q --show-progress --timeout=30 --tries=2 -O "$final_path" "$download_url"; then
         echo -e "${RED}Error: Falló la descarga de '$pkg'.${NC}" >&2
         rm -f "$final_path" 2>/dev/null || true
+        log_download "$download_url" "$final_path" "ERROR"
         return 1
     fi
 
     if [ ! -s "$final_path" ]; then
         echo -e "${RED}Error: La descarga de '$pkg' resultó vacía.${NC}" >&2
         rm -f "$final_path" 2>/dev/null || true
+        log_download "$download_url" "$final_path" "ERROR"
         return 1
     fi
 
     echo -e "${GREEN}✔ Descargado: ${YELLOW}$final_filename${NC}"
+    log_download "$download_url" "$final_path" "OK"
 
     if [ "$extract" -eq 1 ]; then
         echo -e "${YELLOW}Descomprimiendo '$final_filename'...${NC}"
@@ -222,6 +232,7 @@ download_one() {
         fi
         rm -f "$final_path"
         echo -e "${GREEN}✔ Paquete extraído en: ${YELLOW}$DOWNLOAD_DIR${NC}"
+        log_event "EXTRACT" "package=\"$pkg\" destination=\"$DOWNLOAD_DIR\" status=OK"
     fi
 
     return 0

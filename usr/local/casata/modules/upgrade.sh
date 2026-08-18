@@ -1,10 +1,16 @@
 #!/bin/bash
 # /usr/local/casata/modules/upgrade.sh
 # Actualiza paquetes instalados globalmente (sistema) a la última versión disponible en el repositorio.
-# Solo se permiten actualizaciones globales; las actualizaciones de usuario no están soportadas.
+# Solo se permiten actualizaciones globales
+# Copyright (C) 2026 David Baña Szymaniak
 
 shopt -s nullglob
 set -euo pipefail
+
+# Cargar librería de historial
+if [ -f "/usr/local/casata/lib/history-lib.sh" ]; then
+    source "/usr/local/casata/lib/history-lib.sh"
+fi
 
 CASATA_ROOT="/usr/local/casata"
 DATA_DIR="$CASATA_ROOT/data"
@@ -173,8 +179,10 @@ for pkg in "${SELECTED_PKGS[@]}"; do
     echo -e "${YELLOW}Actualizando $pkg (global)...${NC}"
     if sudo casata install -y "$pkg"; then
         echo -e "${GREEN}✔ $pkg actualizado correctamente.${NC}"
+        log_event "UPGRADE_PACKAGE" "package=\"$pkg\" result=SUCCESS"
     else
         echo -e "${RED}✖ Falló la actualización de $pkg.${NC}"
+        log_event "UPGRADE_PACKAGE" "package=\"$pkg\" result=FAILURE"
     fi
 done
 

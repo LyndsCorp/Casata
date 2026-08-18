@@ -9,6 +9,11 @@
 set -euo pipefail
 shopt -s nullglob
 
+# Cargar librería de historial
+if [ -f "/usr/local/casata/lib/history-lib.sh" ]; then
+    source "/usr/local/casata/lib/history-lib.sh"
+fi
+
 CASATA_ROOT="/usr/local/casata"
 NEWS_DIR="$CASATA_ROOT/news"
 MOTD_URL="https://github.com/LyndsCorp/Lynds-MOTD/raw/refs/heads/main/today.txt"
@@ -88,7 +93,6 @@ download_today_motd() {
         exit 1
     fi
     mkdir -p "$NEWS_DIR"
-    # Asegurar que el directorio sea accesible
     chmod 755 "$NEWS_DIR"
     local temp_file=$(mktemp)
     if command -v curl &> /dev/null; then
@@ -107,9 +111,9 @@ download_today_motd() {
     fi
     local dest_file="$NEWS_DIR/${today}.txt"
     mv "$temp_file" "$dest_file"
-    # Hacer el archivo legible para todos los usuarios
     chmod 644 "$dest_file"
     echo -e "${GREEN}Mensaje del día actualizado a ${today}.${NC}"
+    log_event "MOTD" "date=\"$today\" status=UPDATED"
     cat "$dest_file"
 }
 
@@ -121,10 +125,8 @@ download_today_motd() {
 # Devuelve 1 si no se reconoce el alias
 resolve_day_alias() {
     local input="$1"
-    # Convertir a minúsculas para comparación insensible a mayúsculas
     input=$(echo "$input" | tr '[:upper:]' '[:lower:]')
 
-    # Relativos
     case "$input" in
         hoy|today)
             date +%d-%m-%Y
@@ -140,7 +142,6 @@ resolve_day_alias() {
             ;;
     esac
 
-    # Mapeo de nombres de día a número (0=domingo, 1=lunes, ..., 6=sábado)
     local day_num
     case "$input" in
         sunday|domingo)            day_num=0 ;;
@@ -154,17 +155,16 @@ resolve_day_alias() {
     esac
 
     local today_epoch=$(date +%s)
-    local today_wday=$(date +%w)   # 0=domingo, ..., 6=sábado
+    local today_wday=$(date +%w)
     local target_wday=$day_num
 
-    # Días de diferencia (0 si hoy es ese día, positivo para días pasados)
     local days_ago=$(( (today_wday - target_wday + 7) % 7 ))
     local target_epoch=$(( today_epoch - days_ago * 86400 ))
     date -d "@$target_epoch" +%d-%m-%Y
     return 0
 }
 
-# Muestra un MOTD aleatorio de entre los disponibles
+# Muestra un MOTD aleatorio
 show_random_motd() {
     if [ ! -d "$NEWS_DIR" ]; then
         echo -e "${RED}No hay mensajes del día disponibles.${NC}"
@@ -194,7 +194,6 @@ list_available_days() {
         exit 0
     fi
     echo "Días disponibles:"
-    # Mostrar fechas ordenadas
     for f in "${files[@]}"; do
         basename "$f" .txt
     done | sort | while read -r d; do
@@ -207,12 +206,9 @@ list_available_days() {
 # ----------------------------------------------------------------------
 
 if [ $# -eq 0 ]; then
-    # Sin argumentos: comportamiento clásico
     if [ "$EUID" -eq 0 ]; then
-        # root: descargar y mostrar el de hoy
         download_today_motd
     else
-        # usuario normal: mostrar el más reciente
         latest_file=$(get_latest_file)
         if [ -z "$latest_file" ]; then
             echo "No hay mensajes del día disponibles."
@@ -235,12 +231,10 @@ else
             list_available_days
             ;;
         *)
-            # Intentar resolver como alias de día
             resolved_date=$(resolve_day_alias "$arg" || true)
             if [ -n "$resolved_date" ]; then
                 show_motd_for_date "$resolved_date"
             else
-                # Si no, interpretar como fecha literal
                 show_motd_for_date "$arg"
             fi
             ;;

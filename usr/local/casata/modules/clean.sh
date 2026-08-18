@@ -4,6 +4,11 @@
 
 shopt -s nullglob
 
+# Cargar librería de historial
+if [ -f "/usr/local/casata/lib/history-lib.sh" ]; then
+    source "/usr/local/casata/lib/history-lib.sh"
+fi
+
 CASATA_ROOT="/usr/local/casata"
 SINGREPOS_DIR="$CASATA_ROOT/repos/singrepos"
 DATA_DIR="$CASATA_ROOT/data"
@@ -25,6 +30,7 @@ for app_dir in "$CASATA_ROOT"/apps/*/; do
     if [ "$file_count" -eq 1 ]; then
         echo -e "  ${RED}[Eliminar]${NC} Carpeta de app incompleta: $(basename "$app_dir")"
         rm -rf "$app_dir"
+        log_cleanup_path "$app_dir"
     fi
 done
 
@@ -45,8 +51,10 @@ for FILE in "$SINGREPOS_DIR"/*.json; do
     if ! grep -q "^${PKG_NAME}$" "$VALID_PKGS"; then
         echo -e "  ${RED}[Eliminar]${NC} Singrepo huérfano: $PKG_NAME"
         rm -f "$FILE"
+        log_cleanup_path "$FILE"
         if [ -f "$DATA_DIR/${PKG_NAME}.json" ]; then
             rm -f "$DATA_DIR/${PKG_NAME}.json"
+            log_cleanup_path "$DATA_DIR/${PKG_NAME}.json"
             echo -e "  ${RED}[Eliminar]${NC} Datos asociados: ${PKG_NAME}.json"
             echo
         fi

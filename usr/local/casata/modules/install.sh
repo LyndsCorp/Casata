@@ -8,6 +8,11 @@
 shopt -s nullglob
 set -euo pipefail
 
+# Cargar librería de historial
+if [ -f "/usr/local/casata/lib/history-lib.sh" ]; then
+    source "/usr/local/casata/lib/history-lib.sh"
+fi
+
 GLOBAL_ROOT="/usr/local/casata"
 DATA_DIR="$GLOBAL_ROOT/data"
 SINGREPOS_PRIORITY="$GLOBAL_ROOT/repos/singrepos/PRIORITY"
@@ -335,6 +340,7 @@ install_system_deps() {
             return 1
         fi
     fi
+    log_dependencies_system "$PKG_MANAGER" "${deps_array[*]}"
     return 0
 }
 
@@ -370,6 +376,7 @@ install_pip_deps() {
         echo -e "${RED}Error al instalar dependencias pip.${NC}"
         return 1
     }
+    log_dependencies_pip "${pkgs_ref[*]}"
     return 0
 }
 
@@ -412,6 +419,7 @@ install_casata_deps() {
             echo -e "${RED}Error al instalar la dependencia Casata '$normalized_pkg'.${NC}"
             return 1
         }
+        log_dependencies_casata "$normalized_pkg"
     done
 
     return 0
@@ -501,6 +509,7 @@ force_remove() {
             if [ -L "$TARGET_LINK" ] && [ "$(readlink "$TARGET_LINK")" == "$app_dir/$FILE" ]; then
                 rm -f "$TARGET_LINK"
                 echo -e "   [-] Enlace eliminado: $LINK_NAME"
+                log_symlink_removed "$LINK_NAME" "$TARGET_LINK"
             fi
         done
     fi
@@ -583,7 +592,6 @@ download_external_files() {
         [ -z "$url" ] && continue
         counter=$((counter+1))
 
-        # Limpiar query string y obtener el nombre de archivo
         local clean_url="${url%%\?*}"
         local filename
         filename=$(basename "$clean_url" 2>/dev/null || true)
@@ -596,6 +604,7 @@ download_external_files() {
             echo -e "${RED}Error al descargar $url${NC}"
             return 1
         fi
+        log_external_file "$url" "$app_dir/$filename"
     done
     return 0
 }
@@ -669,6 +678,7 @@ create_symlinks() {
         else
             echo -e "   [+] Enlazado: $LINK_NAME -> $DEST"
         fi
+        log_symlink_created "$LINK_NAME" "$app_dir/$FILE" "$DEST"
     done < <(jq -c '.links[]' "$guide_file")
 }
 
@@ -702,8 +712,10 @@ maybe_run_guide() {
             echo -e "${YELLOW}Ejecutando GUIDE.sh...${NC}"
             if bash "$guide_script"; then
                 echo -e "${GREEN}✓ GUIDE.sh ejecutado correctamente.${NC}"
+                log_event "GUIDE_EXECUTED" "package=\"$pkg_name\" status=SUCCESS"
             else
                 echo -e "${RED}Error al ejecutar GUIDE.sh. La instalación puede estar incompleta.${NC}"
+                log_event "GUIDE_EXECUTED" "package=\"$pkg_name\" status=FAILURE"
                 return 1
             fi
         else
@@ -723,7 +735,6 @@ version_check() {
     local repo_version="$3"
     local auto_yes="$4"
 
-    # repo_version ya viene resuelta (si era URL, ya se descargó)
     if [ -z "$repo_version" ]; then
         echo -e "${YELLOW}Advertencia: No se pudo determinar la versión del paquete. Se asume 0.0.0.${NC}"
         repo_version="0.0.0"
@@ -732,7 +743,6 @@ version_check() {
     if [ -d "$app_dir" ]; then
         if [ -f "$app_dir/VERSION" ]; then
             local installed_version
-            # Versión instalada: se lee directamente del archivo VERSION (nunca es URL)
             installed_version=$(cat "$app_dir/VERSION" 2>/dev/null || echo "0.0.0")
             echo -e "${YELLOW}Versión instalada: $installed_version${NC}"
             echo -e "${YELLOW}Versión de remota: $repo_version${NC}"
@@ -812,7 +822,6 @@ install_one() {
     fi
 
     REPO_VERSION=$(jq -r '.version // "0.0.0"' "$PKG_FILE")
-    # El campo version de metadatos puede ser URL, resolver
     if ! REPO_VERSION=$(resolve_version "$REPO_VERSION"); then
         REPO_VERSION="0.0.0"
         echo -e "${YELLOW}No se pudo resolver la versión del repositorio; se asume 0.0.0.${NC}"
@@ -906,7 +915,7 @@ install_one() {
     ARCHIVE_PATH="$APP_DIR/$ARCHIVE_NAME"
     EXTRACT_DIR=$(mktemp -d)
 
-    # --- NUEVO: confirmación antes de descargar ---
+    # Confirmación antes de descargar
     if [ "$AUTO_YES" -eq 0 ]; then
         echo -e "${YELLOW}Se descargará e instalará $PKG_NAME (versión $REPO_VERSION).${NC}"
         read -p "¿Deseas continuar? [S/n] " resp < /dev/tty
@@ -915,19 +924,27 @@ install_one() {
             return 2
         fi
     fi
-    # ----------------------------------------------
 
     echo -e "${GREEN}Descargando $PKG_NAME...${NC}"
-    wget -q --show-progress -O "$ARCHIVE_PATH" "$DOWNLOAD_URL" || { echo -e "${RED}Error descarga.${NC}"; return 1; }
+    if wget -q --show-progress -O "$ARCHIVE_PATH" "$DOWNLOAD_URL"; then
+        log_download "$DOWNLOAD_URL" "$ARCHIVE_PATH" "OK"
+    else
+        log_download "$DOWNLOAD_URL" "$ARCHIVE_PATH" "ERROR"
+        echo -e "${RED}Error descarga.${NC}"
+        return 1
+    fi
 
     if [ -n "$SHA256" ]; then
         echo -e "${YELLOW}Verificando integridad del archivo...${NC}"
-        echo "$SHA256  $ARCHIVE_PATH" | sha256sum -c - >/dev/null 2>&1 || {
+        if echo "$SHA256  $ARCHIVE_PATH" | sha256sum -c - >/dev/null 2>&1; then
+            echo -e "${GREEN}✓ SHA256 correcto.${NC}"
+            log_sha256 "$ARCHIVE_PATH" "OK"
+        else
             echo -e "${RED}Error: La suma SHA256 no coincide. El archivo podría estar corrupto.${NC}"
+            log_sha256 "$ARCHIVE_PATH" "ERROR"
             rm -f "$ARCHIVE_PATH"
             return 1
-        }
-        echo -e "${GREEN}✓ SHA256 correcto.${NC}"
+        fi
     fi
 
     extract_archive "$ARCHIVE_PATH" "$EXTRACT_DIR" || { rm -rf "$EXTRACT_DIR"; return 1; }
@@ -951,6 +968,7 @@ install_one() {
     maybe_run_guide "$PKG_NAME" "$APP_DIR" "$AUTO_YES" "$REPO_VERSION"
 
     echo -e "${GREEN}¡$PKG_NAME instalado correctamente! (versión $REPO_VERSION)${NC}"
+    log_package_installed "$PKG_NAME" "$REPO_VERSION" "SUCCESS"
     return 0
 }
 
@@ -981,7 +999,6 @@ install_from_file() {
     mkdir -p "$APPS_DIR"
     APP_DIR="$APPS_DIR/$PKG_NAME"
 
-    # Extraer el paquete .casata en un directorio temporal
     EXTRACT_DIR=$(mktemp -d)
 
     echo -e "${GREEN}Extrayendo $PKG_NAME desde archivo local...${NC}"
@@ -990,7 +1007,6 @@ install_from_file() {
         return 1
     fi
 
-    # Variables para metadatos
     local REPO_VERSION=""
     local SHA256=""
     local -a APT_DEPS=() PACMAN_DEPS=() DNF_DEPS=() PIP_DEPS=() CASATA_DEPS=()
@@ -999,19 +1015,16 @@ install_from_file() {
     local RELEASE_URL=""
     local GUIDE_ARRAY=""
 
-    # Buscar DATA.json dentro del paquete extraído
     local DATA_FILE="$SRC_DIR/DATA.json"
     if [ -f "$DATA_FILE" ]; then
         echo -e "${YELLOW}Se encontró DATA.json, usando metadatos del paquete.${NC}"
 
-        # Leer external_metadata
         local external_metadata
         external_metadata=$(jq -r '.external_metadata // false' "$DATA_FILE" 2>/dev/null || echo "false")
         if [[ "$external_metadata" == "true" ]]; then
             EXTERNAL_MODE=1
             echo -e "${YELLOW}Modo external_metadata activado. Se descargará el release oficial.${NC}"
 
-            # Leer release.url
             RELEASE_URL=$(jq -r '.release.url // empty' "$DATA_FILE" 2>/dev/null || true)
             if [ -z "$RELEASE_URL" ]; then
                 echo -e "${RED}Error: external_metadata es true pero no se encontró 'release.url'.${NC}"
@@ -1019,14 +1032,12 @@ install_from_file() {
                 return 1
             fi
 
-            # Leer guide (array)
             GUIDE_ARRAY=$(jq -c '.guide // []' "$DATA_FILE" 2>/dev/null || echo "[]")
             if [ "$GUIDE_ARRAY" == "[]" ]; then
                 echo -e "${YELLOW}Aviso: No se encontró 'guide' en DATA.json. No se crearán enlaces.${NC}"
             fi
         fi
 
-        # Leer campos comunes (version, dependencias, etc.) siempre
         REPO_VERSION=$(jq -r '.version // "0.0.0"' "$DATA_FILE" 2>/dev/null || true)
         if ! REPO_VERSION=$(resolve_version "$REPO_VERSION"); then
             REPO_VERSION="0.0.0"
@@ -1038,10 +1049,8 @@ install_from_file() {
         split_to_array DNF_DEPS "$(jq -r '.dnf? // [] | .[]' "$DATA_FILE" 2>/dev/null || true)" || true
         split_to_array PIP_DEPS "$(jq -r '.pip? // [] | .[]' "$DATA_FILE" 2>/dev/null || true)" || true
         split_to_array CASATA_DEPS "$(jq -r '.casata? // [] | .[]' "$DATA_FILE" 2>/dev/null || true)" || true
-        # Leer archivos externos
         split_to_array EXTERNAL_FILES "$(jq -r '.external_files? // [] | .[]' "$DATA_FILE" 2>/dev/null || true)" || true
     else
-        # Si no hay DATA.json, intentar usar base de datos global o VERSION/DEPS.json (comportamiento anterior)
         local global_json="$DATA_DIR/${PKG_NAME}.json"
         if [ -f "$global_json" ]; then
             if jq empty "$global_json" 2>/dev/null; then
@@ -1098,13 +1107,11 @@ install_from_file() {
         fi
     fi
 
-    # Version check antes de instalar dependencias
     if ! version_check "$APP_DIR" "$PKG_NAME" "$REPO_VERSION" "$AUTO_YES"; then
         rm -rf "$EXTRACT_DIR"
         return 2
     fi
 
-    # Instalar dependencias (comunes para ambos modos)
     if [ "${SKIP_SYSTEM_DEPS:-0}" -eq 0 ]; then
         local -a SYSTEM_DEPS=()
         case "$PKG_MANAGER" in
@@ -1159,7 +1166,6 @@ install_from_file() {
         fi
     fi
 
-    # Eliminar instalación anterior
     if [ -d "$APP_DIR" ]; then
         echo -e "${YELLOW}Preparando actualización/reinstalación...${NC}"
         force_remove "$APP_DIR" "$GUIDE_TARGET"
@@ -1167,11 +1173,7 @@ install_from_file() {
 
     mkdir -p "$APP_DIR"
 
-    # ----------------------------------------------
-    # Modo external_metadata: descargar release oficial
-    # ----------------------------------------------
     if [ $EXTERNAL_MODE -eq 1 ]; then
-        # --- NUEVO: confirmación antes de descargar el release oficial ---
         if [ "$AUTO_YES" -eq 0 ]; then
             echo -e "${YELLOW}Se descargará el release oficial desde $RELEASE_URL.${NC}"
             read -p "¿Deseas continuar? [S/n] " resp < /dev/tty
@@ -1181,7 +1183,6 @@ install_from_file() {
                 return 2
             fi
         fi
-        # ------------------------------------------------------------------
 
         echo -e "${GREEN}Descargando release oficial desde $RELEASE_URL...${NC}"
         local release_tmp=$(mktemp -d)
@@ -1190,9 +1191,11 @@ install_from_file() {
 
         if ! wget -q --show-progress -O "$archive_path" "$RELEASE_URL"; then
             echo -e "${RED}Error al descargar el release.${NC}"
+            log_download "$RELEASE_URL" "$archive_path" "ERROR"
             rm -rf "$release_tmp" "$EXTRACT_DIR"
             return 1
         fi
+        log_download "$RELEASE_URL" "$archive_path" "OK"
 
         echo -e "${YELLOW}Extrayendo release...${NC}"
         if ! extract_archive "$archive_path" "$release_tmp"; then
@@ -1201,7 +1204,6 @@ install_from_file() {
             return 1
         fi
 
-        # Mover contenido del release a APP_DIR
         (
             shopt -s dotglob nullglob
             files=("$SRC_DIR"/*)
@@ -1211,24 +1213,19 @@ install_from_file() {
         )
         rm -rf "$release_tmp"
 
-        # Copiar archivos adicionales del paquete .casata (excepto DATA.json) a APP_DIR
         echo -e "${YELLOW}Copiando archivos adicionales del distribuidor...${NC}"
         (
             shopt -s dotglob nullglob
-            # Cambiar al directorio EXTRACT_DIR (que contiene el contenido extraído del .casata)
             cd "$EXTRACT_DIR" || exit 1
             for item in *; do
-                # Saltar DATA.json y cualquier otro archivo que no queramos copiar
                 if [ "$item" != "DATA.json" ] && [ "$item" != "GUIDE.json" ] && [ "$item" != "DEPS.json" ] && [ "$item" != "VERSION" ]; then
                     if [ -e "$item" ]; then
-                        # Copiar recursivamente, sobrescribiendo
                         cp -r -- "$item" "$APP_DIR/"
                     fi
                 fi
             done
         )
     else
-        # Modo normal: mover todo el contenido extraído del .casata a APP_DIR
         (
             shopt -s dotglob nullglob
             files=("$SRC_DIR"/*)
@@ -1238,19 +1235,13 @@ install_from_file() {
         )
     fi
 
-    # Limpiar directorio de extracción del .casata
     rm -rf "$EXTRACT_DIR"
     EXTRACT_DIR=""
 
-    # Descargar archivos externos si los hay
     if [ ${#EXTERNAL_FILES[@]} -gt 0 ]; then
         download_external_files "$APP_DIR" EXTERNAL_FILES || return 1
     fi
 
-    # ------------------------------------------------------------
-    # Crear enlaces simbólicos según GUIDE
-    # ------------------------------------------------------------
-    # Si estamos en modo external y tenemos GUIDE_ARRAY, generar GUIDE.json
     if [ $EXTERNAL_MODE -eq 1 ] && [ -n "$GUIDE_ARRAY" ] && [ "$GUIDE_ARRAY" != "[]" ]; then
         echo -e "${YELLOW}Generando GUIDE.json a partir del 'guide' del DATA.json...${NC}"
         if ! jq -n --argjson links "$GUIDE_ARRAY" '{links: $links}' > "$APP_DIR/GUIDE.json"; then
@@ -1259,13 +1250,11 @@ install_from_file() {
         fi
     fi
 
-    # Crear enlaces (si existe GUIDE.json en APP_DIR)
     create_symlinks "$APP_DIR" "$GUIDE_TARGET" "$PKG_NAME" "$AUTO_YES"
-
-    # Ejecutar GUIDE.sh si el paquete está en la lista de prioridad
     maybe_run_guide "$PKG_NAME" "$APP_DIR" "$AUTO_YES" "$REPO_VERSION"
 
     echo -e "${GREEN}¡$PKG_NAME instalado correctamente! (versión $REPO_VERSION)${NC}"
+    log_package_installed "$PKG_NAME" "$REPO_VERSION" "SUCCESS"
     return 0
 }
 

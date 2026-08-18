@@ -1,11 +1,17 @@
 #!/bin/bash
 
 # /usr/local/casata/modules/update.sh
-# Copyright (C) 2026, GPL v3+, Lynds Corp., Aros Legendarios, David Baña Szymaniak
+# Copyright (C) 2026 David Baña Szymaniak
+# GPL v3 License
 # Script de actualización de repositorios de Casata
 
 shopt -s nullglob
 set -euo pipefail
+
+# Cargar librería de historial
+if [ -f "/usr/local/casata/lib/history-lib.sh" ]; then
+    source "/usr/local/casata/lib/history-lib.sh"
+fi
 
 CASATA_ROOT="/usr/local/casata"
 METAREPOS_DIR="$CASATA_ROOT/repos/metarepos"
@@ -161,14 +167,17 @@ procesar_metarepo() {
                 mv "$TEMP_META" "$REPO_FILE"
                 chmod 644 "$REPO_FILE"
                 echo -e "${GREEN}✓ Metarepo actualizado${NC}"
+                log_repo_updated "$(jq -r '.name // "desconocido"' "$REPO_FILE")" "OK"
             else
                 echo -e "${RED}✗ ERROR: falló la descarga del metarepo (JSON inválido). Conservando versión anterior.${NC}"
                 rm -f "$TEMP_META"
+                log_repo_updated "$(jq -r '.name // "desconocido"' "$REPO_FILE")" "ERROR"
                 ((ERRORES++))
             fi
         else
             echo -e "${RED}✗ ERROR: falló la descarga del metarepo (error de red o servidor). Conservando metarepo local.${NC}"
             rm -f "$TEMP_META"
+            log_repo_updated "$(jq -r '.name // "desconocido"' "$REPO_FILE")" "ERROR"
             ((ERRORES++))
         fi
     fi
@@ -185,6 +194,7 @@ procesar_metarepo() {
         if ! wget -q --timeout=20 --tries=2 -O "$TEMP_SING" "$SINGREPO_URL"; then
             echo -e "     ${RED}✗ ERROR: falló la descarga del singrepo (error de red o servidor).${NC}"
             rm -f "$TEMP_SING"
+            log_repo_updated "$PKG_NAME" "ERROR"
             ((ERRORES++))
             continue
         fi
@@ -192,6 +202,7 @@ procesar_metarepo() {
         if ! jq empty "$TEMP_SING" 2>/dev/null; then
             echo -e "     ${RED}✗ ERROR: falló la descarga del singrepo (JSON inválido).${NC}"
             rm -f "$TEMP_SING"
+            log_repo_updated "$PKG_NAME" "ERROR"
             ((ERRORES++))
             continue
         fi
@@ -236,6 +247,7 @@ procesar_metarepo() {
         chmod 644 "$SINGREPO_DEST"
         SINGREPO_ORIGIN["$PKG_NAME"]="$REPO_NAME"
         echo -e "     ${GREEN}✓ Singrepo actualizado${NC}"
+        log_repo_updated "$PKG_NAME" "OK"
 
         DATA_URL=$(jq -r '.data_url // empty' "$SINGREPO_DEST")
         [ -z "$DATA_URL" ] && { echo -e "     ${YELLOW}⚠ ERROR DEL SERVIDOR: Sin data_url${NC}"; continue; }
