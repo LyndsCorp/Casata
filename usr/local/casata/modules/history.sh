@@ -1,5 +1,6 @@
 #!/bin/bash
 # /usr/local/casata/modules/history.sh
+
 # Copyright (C) 2026 David Baña Szymaniak
 
 CASATA_ROOT="/usr/local/casata"
@@ -8,7 +9,6 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-# Cargar librería si existe
 if [ -f "$CASATA_ROOT/lib/history-lib.sh" ]; then
     source "$CASATA_ROOT/lib/history-lib.sh"
 fi
@@ -18,22 +18,37 @@ show_help() {
 Uso: casata history [OPCIONES]
 
 Opciones:
-  --user [nombre]   Ver historial de un usuario específico.
-                    Sin nombre, usa el usuario actual.
-                    (Por defecto se muestra el historial global/root)
-  --type <tipo>     Filtrar por tipo (COMMAND, COMMAND_RESULT, DEPENDENCIES_*, SYMLINK_*, DOWNLOAD, etc.)
-  --search <texto>  Buscar texto en las líneas
-  --lines N         Mostrar solo las últimas N líneas
-  --disable         Desactivar el registro de historial
-  --enable          Reactivar el registro de historial
-  --clear           Limpiar el historial (pide confirmación)
-  --help            Mostrar esta ayuda
+  --date <fecha>      Ver solo entradas de una fecha (DD-MM-YYYY o D-M-YYYY)
+  --user [nombre]     Ver historial de un usuario. Sin nombre usa el actual.
+                      Por defecto se muestra el historial global/root.
+  --type <tipo>       Filtrar por tipo (p. ej. PAQUETE_INSTALADO, ENLACE_CREADO, etc.)
+  --search <texto>    Buscar texto en las líneas
+  --lines N           Mostrar solo las N entradas más recientes
+  --disable           Desactivar el registro de historial
+  --enable            Reactivar el registro de historial
+  --clear             Limpiar el historial (pide confirmación)
+  --help              Mostrar esta ayuda
 
-Sin opciones, muestra el historial global (de root) para todos los usuarios.
+Sin opciones, muestra el historial global (de root) del más reciente al más antiguo.
 EOF
 }
 
-# Pager tipo git log (sale con q o Ctrl+C)
+# Normalizar fecha DD-MM-YYYY a YYYY-MM-DD
+normalize_date() {
+    local input="$1"
+    input="${input//\//-}"
+    input="${input//./-}"
+    IFS='-' read -ra parts <<< "$input"
+    [ ${#parts[@]} -ne 3 ] && return 1
+    local day=$(printf "%02d" "$((10#${parts[0]}))" 2>/dev/null)
+    local month=$(printf "%02d" "$((10#${parts[1]}))" 2>/dev/null)
+    local year="${parts[2]}"
+    if [ -z "$day" ] || [ -z "$month" ] || ! [[ "$year" =~ ^[0-9]{4}$ ]]; then
+        return 1
+    fi
+    echo "${year}-${month}-${day}"
+}
+
 show_with_pager() {
     if [ -t 1 ]; then
         if command -v less &>/dev/null; then
@@ -49,6 +64,7 @@ show_with_pager() {
 }
 
 USER_SPEC=""
+DATE_SPEC=""
 TYPE_SPEC=""
 SEARCH_SPEC=""
 LINES=""
@@ -57,21 +73,30 @@ DISABLE=0; ENABLE=0; CLEAR=0; SHOW_HELP=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --user)
-            # Argumento opcional
             if [ -n "$2" ] && [[ "$2" != -* ]]; then
                 USER_SPEC="$2"
                 shift 2
             else
-                USER_SPEC="$(id -un)"   # usuario actual
+                USER_SPEC="$(id -un)"
                 shift
             fi
             ;;
+        --date|--fecha|--day)
+            DATE_SPEC="$2"
+            shift 2
+            ;;
         --type)
-            TYPE_SPEC="$2"; shift 2 ;;
+            TYPE_SPEC="$2"
+            shift 2
+            ;;
         --search)
-            SEARCH_SPEC="$2"; shift 2 ;;
+            SEARCH_SPEC="$2"
+            shift 2
+            ;;
         --lines)
-            LINES="$2"; shift 2 ;;
+            LINES="$2"
+            shift 2
+            ;;
         --disable)
             DISABLE=1; shift ;;
         --enable)
@@ -90,7 +115,7 @@ done
 
 if [ $SHOW_HELP -eq 1 ]; then show_help; exit 0; fi
 
-# Acciones de control (usan el ámbito según EUID)
+# Acciones de control
 if [ $DISABLE -eq 1 ]; then
     touch "$(get_no_log_flag)"
     echo -e "${GREEN}Historial desactivado.${NC}"
@@ -119,8 +144,7 @@ if [ $CLEAR -eq 1 ]; then
     exit 0
 fi
 
-# Vista del historial
-# Por defecto: historial global/root para todos
+# Determinar archivo a mostrar
 if [ -n "$USER_SPEC" ]; then
     USER_HOME=$(getent passwd "$USER_SPEC" | cut -d: -f6)
     if [ -z "$USER_HOME" ]; then
@@ -137,22 +161,54 @@ if [ ! -f "$TARGET_LOG" ]; then
     exit 0
 fi
 
-# Construir filtro
-if [ -n "$TYPE_SPEC" ]; then
-    FILTER_CMD=(grep "type=$TYPE_SPEC" "$TARGET_LOG")
-elif [ -n "$SEARCH_SPEC" ]; then
-    FILTER_CMD=(grep -F "$SEARCH_SPEC" "$TARGET_LOG")
-else
-    FILTER_CMD=(cat "$TARGET_LOG")
+# Normalizar fecha si se especificó
+NORMALIZED_DATE=""
+if [ -n "$DATE_SPEC" ]; then
+    NORMALIZED_DATE="$(normalize_date "$DATE_SPEC")"
+    if [ -z "$NORMALIZED_DATE" ]; then
+        echo -e "${RED}Error: Fecha inválida '$DATE_SPEC'. Use DD-MM-YYYY.${NC}"
+        exit 1
+    fi
 fi
 
-# Aplicar límite de líneas y paginador
+# Límite de líneas (0 = sin límite)
+LIMIT=0
 if [ -n "$LINES" ]; then
     if ! [[ "$LINES" =~ ^[0-9]+$ ]]; then
         echo -e "${RED}--lines debe ser un número.${NC}"
         exit 1
     fi
-    "${FILTER_CMD[@]}" | tail -n "$LINES" | show_with_pager
-else
-    "${FILTER_CMD[@]}" | show_with_pager
+    LIMIT="$LINES"
 fi
+
+# Mostrar historial aplicando filtros de forma segura
+# Se lee línea por línea y se filtran por tipo, búsqueda y fecha.
+# El orden es el del archivo (más reciente arriba).
+{
+    count=0
+    while IFS= read -r line; do
+        # Aplicar filtro por tipo (búsqueda exacta de la etiqueta)
+        if [ -n "$TYPE_SPEC" ] && [[ "$line" != *"[$TYPE_SPEC]"* ]]; then
+            continue
+        fi
+
+        # Aplicar filtro por texto (búsqueda literal)
+        if [ -n "$SEARCH_SPEC" ] && [[ "$line" != *"$SEARCH_SPEC"* ]]; then
+            continue
+        fi
+
+        # Aplicar filtro por fecha (formato [YYYY-MM-DD ...)
+        if [ -n "$NORMALIZED_DATE" ] && [[ "$line" != \[$NORMALIZED_DATE\ * ]]; then
+            continue
+        fi
+
+        # Si la línea pasa todos los filtros, mostrarla
+        echo "$line"
+        count=$((count + 1))
+
+        # Si hay límite y ya lo alcanzamos, salir del bucle
+        if [ "$LIMIT" -gt 0 ] && [ "$count" -ge "$LIMIT" ]; then
+            break
+        fi
+    done < "$TARGET_LOG"
+} | show_with_pager

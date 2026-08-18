@@ -47,10 +47,23 @@ run_module() {
 
     log_command_start "$FULL_COMMAND"
 
+    local tmp_output
+    tmp_output="$(mktemp)"
+
     set +e
-    bash "$module_script" "$@"
-    local code=$?
+    bash "$module_script" "$@" 2>&1 | tee "$tmp_output"
+    local code=${PIPESTATUS[0]}
     set -e
+
+    local combined_output
+    combined_output="$(cat "$tmp_output" 2>/dev/null)"
+    rm -f "$tmp_output"
+
+    # Registrar salida y errores (combinados)
+    log_output "$FULL_COMMAND" "$combined_output"
+    if [ $code -ne 0 ]; then
+        log_error_output "$FULL_COMMAND" "$combined_output"
+    fi
 
     log_command_end $code "$FULL_COMMAND"
     return $code
@@ -83,7 +96,6 @@ case "$COMMAND" in
     --help|--h|-h|ayuda|--ayuda|help|--help|-ayuda) COMMAND="--help" ;;
 esac
 
-# Guardar el comando completo para el log (después de normalización)
 FULL_COMMAND="$COMMAND $*"
 
 case "$COMMAND" in
