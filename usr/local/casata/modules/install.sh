@@ -49,7 +49,8 @@ NC='\033[0m'
 # ------------------------------------------------------------
 _sugerir_reparacion_casata() {
     local codigo=$?
-    if [ "$codigo" -ne 0 ]; then
+    # No recomendar reparación para cancelaciones o señales
+    if [ "$codigo" -ne 0 ] && [ "$codigo" -ne 2 ] && [ "$codigo" -ne 130 ] && [ "$codigo" -ne 141 ]; then
         printf '%b\n' "${RED}Se detectó un error inesperado (código ${codigo}).${NC}" >&2
         printf '%b\n' "${YELLOW}Recomendación: ejecuta 'sudo casata install casata' para reparar Casata.${NC}" >&2
     fi
@@ -1434,7 +1435,7 @@ if [ $FILE_MODE -eq 1 ]; then
         set -e
         case $ret in
             0) echo -e "${GREEN}✔ $FILE instalado correctamente.${NC}" ;;
-            2) echo -e "${YELLOW}⊘ $FILE omitido (instalación cancelada).${NC}" ;;
+            2) echo -e "${RED}⊘ $FILE omitido (instalación cancelada).${NC}" ;;
             *) echo -e "${RED}✖ Falló la instalación de $FILE.${NC}"; FAILED+=("$FILE") ;;
         esac
     done
@@ -1538,7 +1539,7 @@ if [ ${#PACKAGES[@]} -gt 1 ]; then
         set -e
         case $ret in
             0) echo -e "${GREEN}✔ $PKG instalado correctamente.${NC}" ;;
-            2) echo -e "${YELLOW}⊘ $PKG omitido (instalación cancelada).${NC}" ;;
+            2) echo -e "${RED}⊘ $PKG omitido (instalación cancelada).${NC}" ;;
             *) echo -e "${RED}✖ Falló la instalación de $PKG.${NC}"; FAILED+=("$PKG") ;;
         esac
     done
@@ -1571,7 +1572,7 @@ for PKG in "${PACKAGES[@]}"; do
     set -e
     case $ret in
         0) echo -e "${GREEN}✔ $PKG instalado correctamente.${NC}" ;;
-        2) echo -e "${YELLOW}⊘ $PKG omitido (instalación cancelada).${NC}" ;;
+        2) echo -e "${RED}⊘ $PKG omitido (instalación cancelada).${NC}" ;;
         *) echo -e "${RED}✖ Falló la instalación de $PKG.${NC}"; FAILED+=("$PKG") ;;
     esac
 done
