@@ -14,6 +14,18 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+# ------------------------------------------------------------
+# Detección de bugs y recomendación de reparación
+# ------------------------------------------------------------
+_sugerir_reparacion_casata() {
+    local codigo=$?
+    if [ "$codigo" -ne 0 ]; then
+        printf '%b\n' "${RED}Se detectó un error inesperado (código ${codigo}).${NC}" >&2
+        printf '%b\n' "${YELLOW}Recomendación: ejecuta 'sudo casata install casata' para reparar Casata.${NC}" >&2
+    fi
+}
+trap _sugerir_reparacion_casata ERR
+
 # Variable para limpieza
 TEMP_DIR=""
 
@@ -101,7 +113,6 @@ cp -r "$EXTRACTED/usr/local/casata/modules" "$GLOBAL_ROOT/"
 
 # Reemplazar librerias
 rm -rf "$GLOBAL_ROOT/lib"
-chmod +x "$GLOBAL_ROOT"/lib/*.sh
 cp -r "$EXTRACTED/usr/local/casata/lib" "$GLOBAL_ROOT/"
 chmod +x "$GLOBAL_ROOT"/lib/*.sh
 

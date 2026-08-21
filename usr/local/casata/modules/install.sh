@@ -45,6 +45,18 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 # ------------------------------------------------------------
+# Detección de bugs y recomendación de reparación
+# ------------------------------------------------------------
+_sugerir_reparacion_casata() {
+    local codigo=$?
+    if [ "$codigo" -ne 0 ]; then
+        printf '%b\n' "${RED}Se detectó un error inesperado (código ${codigo}).${NC}" >&2
+        printf '%b\n' "${YELLOW}Recomendación: ejecuta 'sudo casata install casata' para reparar Casata.${NC}" >&2
+    fi
+}
+trap _sugerir_reparacion_casata ERR
+
+# ------------------------------------------------------------
 # Función para resolver versiones que pueden ser URLs
 # ------------------------------------------------------------
 resolve_version() {
@@ -127,12 +139,20 @@ repair_casata() {
 # Carga de rutas protegidas desde archivo externo
 # ------------------------------------------------------------
 load_protected_paths() {
-    if [ ! -f "$SAVE_FILES_FILE" ] && [ AUTO_YES == 0 ]; then #si AUTO_YES está desactivado...
+    if [ ! -f "$SAVE_FILES_FILE" ]; then
         echo -e "${RED}Error: Archivo de protección no encontrado: $SAVE_FILES_FILE${NC}" >&2
-        exit 1
-    elif [ ! -f "$SAVE_FILES_FILE" ] && [ AUTO_YES == 1 ]; then #si tiene activador el AUTO_YES...
-        echo -e "${RED}Archivo de protección no encontrado: $SAVE_FILES_FILE. Reparando Casata por -y...${NC}" >&2
-        repair_casata
+        echo -e "${YELLOW}Recomendación: ejecuta 'sudo casata install casata' para reparar Casata.${NC}" >&2
+
+        if [ "${AUTO_YES:-0}" -eq 1 ]; then
+            echo -e "${YELLOW}Intentando reparar Casata automáticamente por -y...${NC}" >&2
+            repair_casata
+            if [ ! -f "$SAVE_FILES_FILE" ]; then
+                echo -e "${RED}La reparación no restauró $SAVE_FILES_FILE. Abortando.${NC}" >&2
+                exit 1
+            fi
+        else
+            exit 1
+        fi
     fi
 
     while IFS= read -r line; do
@@ -625,7 +645,6 @@ download_external_files() {
         [ -z "$url" ] && continue
         counter=$((counter+1))
 
-        # Limpiar query string y obtener el nombre de archivo
         local clean_url="${url%%\?*}"
         local filename
         filename=$(basename "$clean_url" 2>/dev/null || true)
@@ -944,7 +963,6 @@ install_one() {
     local temp_download_dir="$TEMP_BASE/install-$$"
     mkdir -p "$temp_download_dir"
 
-    # Obtener extensión del archivo remoto
     local remote_ext
     remote_ext="$(get_file_extension "$DOWNLOAD_URL")"
     if [ -z "$remote_ext" ]; then
@@ -953,7 +971,6 @@ install_one() {
         return 1
     fi
 
-    # Nombre del archivo descargado: nombre-paquete.extension-remota.casata
     local final_filename="${PKG_NAME}.${remote_ext}.casata"
     local ARCHIVE_PATH="$temp_download_dir/$final_filename"
 
@@ -998,14 +1015,12 @@ install_one() {
         return 1
     fi
 
-    # Verificar que se extrajo contenido
     if [ -z "$SRC_DIR" ] || [ ! -d "$SRC_DIR" ]; then
         echo -e "${RED}Error: No se pudo determinar el contenido del paquete.${NC}"
         rm -rf "$temp_download_dir"
         return 1
     fi
 
-    # Mostrar resumen de cambios si ya existe una versión anterior
     if [ -d "$APP_DIR" ]; then
         show_removal_summary "$APP_DIR" "$GUIDE_TARGET"
         if [ $AUTO_YES -eq 0 ]; then
@@ -1016,11 +1031,9 @@ install_one() {
                 return 2
             fi
         fi
-        # Ahora sí eliminar la versión anterior
         force_remove "$APP_DIR" "$GUIDE_TARGET"
     fi
 
-    # Mover archivos extraídos al directorio final
     mkdir -p "$APP_DIR"
     (
         shopt -s dotglob nullglob
@@ -1030,11 +1043,9 @@ install_one() {
         fi
     )
 
-    # Limpiar temporales
     rm -rf "$temp_download_dir"
     unset extract_dir temp_download_dir
 
-    # Descargar archivos externos si los hay
     if [ ${#EXTERNAL_FILES[@]} -gt 0 ]; then
         download_external_files "$APP_DIR" EXTERNAL_FILES || return 1
     fi
@@ -1074,7 +1085,6 @@ install_from_file() {
     mkdir -p "$APPS_DIR"
     APP_DIR="$APPS_DIR/$PKG_NAME"
 
-    # Extraer el paquete .casata en un directorio temporal
     local temp_download_dir="$TEMP_BASE/install-file-$$"
     mkdir -p "$temp_download_dir"
     local extract_dir="$temp_download_dir/extract"
@@ -1087,7 +1097,6 @@ install_from_file() {
         return 1
     fi
 
-    # Variables para metadatos
     local REPO_VERSION=""
     local SHA256=""
     local -a APT_DEPS=() PACMAN_DEPS=() DNF_DEPS=() PIP_DEPS=() CASATA_DEPS=()
@@ -1096,7 +1105,6 @@ install_from_file() {
     local RELEASE_URL=""
     local GUIDE_ARRAY=""
 
-    # Buscar DATA.json dentro del paquete extraído
     local DATA_FILE="$SRC_DIR/DATA.json"
     if [ -f "$DATA_FILE" ]; then
         echo -e "${YELLOW}Se encontró DATA.json, usando metadatos del paquete.${NC}"
@@ -1189,13 +1197,11 @@ install_from_file() {
         fi
     fi
 
-    # Version check antes de instalar dependencias
     if ! version_check "$APP_DIR" "$PKG_NAME" "$REPO_VERSION" "$AUTO_YES"; then
         rm -rf "$temp_download_dir"
         return 2
     fi
 
-    # Instalar dependencias (comunes para ambos modos)
     if [ "${SKIP_SYSTEM_DEPS:-0}" -eq 0 ]; then
         local -a SYSTEM_DEPS=()
         case "$PKG_MANAGER" in
@@ -1250,7 +1256,6 @@ install_from_file() {
         fi
     fi
 
-    # Si ya existe una versión anterior, mostrar resumen y pedir confirmación
     if [ -d "$APP_DIR" ]; then
         show_removal_summary "$APP_DIR" "$GUIDE_TARGET"
         if [ $AUTO_YES -eq 0 ]; then
@@ -1264,15 +1269,12 @@ install_from_file() {
         force_remove "$APP_DIR" "$GUIDE_TARGET"
     fi
 
-    # Mover archivos extraídos al directorio final
     mkdir -p "$APP_DIR"
 
     if [ $EXTERNAL_MODE -eq 1 ]; then
-        # Descargar release externo a temp y extraer
         local release_tmp="$temp_download_dir/release"
         mkdir -p "$release_tmp"
 
-        # Obtener extensión del release oficial
         local release_ext
         release_ext="$(get_file_extension "$RELEASE_URL")"
         if [ -z "$release_ext" ]; then
@@ -1307,7 +1309,6 @@ install_from_file() {
         )
         rm -rf "$release_tmp"
 
-        # Copiar archivos adicionales del distribuidor (del extraído .casata)
         echo -e "${YELLOW}Copiando archivos adicionales del distribuidor...${NC}"
         (
             shopt -s dotglob nullglob
@@ -1321,7 +1322,6 @@ install_from_file() {
             done
         )
     else
-        # Modo normal: mover todo el contenido extraído
         (
             shopt -s dotglob nullglob
             files=("$SRC_DIR"/*)
@@ -1331,16 +1331,13 @@ install_from_file() {
         )
     fi
 
-    # Limpiar temporales
     rm -rf "$temp_download_dir"
     unset extract_dir temp_download_dir
 
-    # Descargar archivos externos si los hay
     if [ ${#EXTERNAL_FILES[@]} -gt 0 ]; then
         download_external_files "$APP_DIR" EXTERNAL_FILES || return 1
     fi
 
-    # Generar GUIDE.json si es necesario
     if [ $EXTERNAL_MODE -eq 1 ] && [ -n "$GUIDE_ARRAY" ] && [ "$GUIDE_ARRAY" != "[]" ]; then
         echo -e "${YELLOW}Generando GUIDE.json a partir del 'guide' del DATA.json...${NC}"
         if ! jq -n --argjson links "$GUIDE_ARRAY" '{links: $links}' > "$APP_DIR/GUIDE.json"; then
