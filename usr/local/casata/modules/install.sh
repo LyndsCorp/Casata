@@ -115,13 +115,24 @@ canonical_path() {
     fi
 }
 
+# ---------------------------
+# Función para reparar Casata
+# ---------------------------
+repair_casata() {
+    casata install casata -y #de momento es solo esto
+}
+
+
 # ------------------------------------------------------------
 # Carga de rutas protegidas desde archivo externo
 # ------------------------------------------------------------
 load_protected_paths() {
-    if [ ! -f "$SAVE_FILES_FILE" ]; then
+    if [ ! -f "$SAVE_FILES_FILE" ] && [ AUTO_YES == 0 ]; then #si AUTO_YES está desactivado...
         echo -e "${RED}Error: Archivo de protección no encontrado: $SAVE_FILES_FILE${NC}" >&2
         exit 1
+    elif [ ! -f "$SAVE_FILES_FILE" ] && [ AUTO_YES == 1 ]; then #si tiene activador el AUTO_YES...
+        echo -e "${RED}Archivo de protección no encontrado: $SAVE_FILES_FILE. Reparando Casata por -y...${NC}" >&2
+        repair_casata
     fi
 
     while IFS= read -r line; do

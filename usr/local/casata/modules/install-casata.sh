@@ -29,7 +29,6 @@ AUTO_YES=0
 for arg in "$@"; do
     case "$arg" in
         -y) AUTO_YES=1 ;;
-        -d) ;; # no aplica para actualización, lo ignoramos
     esac
 done
 
