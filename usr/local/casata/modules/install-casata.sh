@@ -110,6 +110,7 @@ chmod +x /usr/bin/casata
 # Reemplazar módulos
 rm -rf "$GLOBAL_ROOT/modules"
 cp -r "$EXTRACTED/usr/local/casata/modules" "$GLOBAL_ROOT/"
+chmod +x "$GLOBAL_ROOT"/modules/*.sh
 
 # Reemplazar librerias
 rm -rf "$GLOBAL_ROOT/lib"
