@@ -50,16 +50,13 @@ expand_download_path() {
     local path="$1"
     local home="$2"
 
-    # Reemplazar $HOME y ${HOME}
     path="${path//\$HOME/$home}"
     path="${path//\$\{HOME\}/$home}"
 
-    # Expandir ~ al inicio
     if [[ "$path" == "~"* ]]; then
         path="$home${path:1}"
     fi
 
-    # Quitar barra final excepto si es la raíz
     if [ "$path" != "/" ]; then
         path="${path%/}"
     fi
@@ -96,7 +93,6 @@ get_download_dir() {
 
 # ------------------------------------------------------------
 # Extraer la extensión del archivo remoto
-# Mantiene extensiones compuestas como tar.gz, tar.xz, etc.
 # ------------------------------------------------------------
 get_file_extension() {
     local url="$1"
@@ -106,7 +102,6 @@ get_file_extension() {
     filename=$(basename "$url" | cut -d '?' -f1)
     lower=$(printf '%s' "$filename" | tr '[:upper:]' '[:lower:]')
 
-    # Detectar extensiones compuestas primero
     if [[ "$lower" =~ \.(tar\.gz|tar\.xz|tar\.bz2|tgz|txz|tbz2)$ ]]; then
         printf '%s' "${BASH_REMATCH[1]}"
     elif [[ "$lower" =~ \.([a-z0-9]+)$ ]]; then
@@ -156,55 +151,39 @@ extract_archive() {
 }
 
 # ------------------------------------------------------------
-# Encontrar la carpeta raíz del contenido extraído
-# Similar a la lógica en install.sh
+# Empaquetar una carpeta en un archivo con la extensión dada
 # ------------------------------------------------------------
-find_extracted_root() {
-    local base_dir="$1"
-    local root
+pack_archive() {
+    local src_dir="$1"
+    local archive_path="$2"
+    local extension="$3"
+    local parent_dir
 
-    # Buscar carpeta que contenga VERSION
-    root=$(find "$base_dir" -maxdepth 3 -name "VERSION" -printf '%h\n' 2>/dev/null | head -1)
-    if [ -n "$root" ]; then
-        echo "$root"
-        return 0
-    fi
+    parent_dir=$(dirname "$src_dir")
+    local folder_name
+    folder_name=$(basename "$src_dir")
 
-    # Si no hay VERSION, tomar la primera subcarpeta
-    root=$(find "$base_dir" -mindepth 1 -maxdepth 1 -type d | head -1)
-    if [ -n "$root" ]; then
-        echo "$root"
-        return 0
-    fi
-
-    # Si no hay subcarpeta, usar el propio directorio
-    echo "$base_dir"
-}
-
-# ------------------------------------------------------------
-# Renombrar la carpeta raíz extraída al nombre del paquete
-# Solo si hay una única carpeta y su nombre difiere
-# ------------------------------------------------------------
-rename_extracted_root() {
-    local dest_dir="$1"
-    local pkg_name="$2"
-
-    # Listar elementos de primer nivel (solo directorios)
-    local -a top_dirs=()
-    while IFS= read -r dir; do
-        top_dirs+=("$dir")
-    done < <(find "$dest_dir" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null)
-
-    # Solo renombrar si hay exactamente un directorio
-    if [ ${#top_dirs[@]} -eq 1 ]; then
-        local old_name="${top_dirs[0]}"
-        if [ "$old_name" != "$pkg_name" ]; then
-            local old_path="$dest_dir/$old_name"
-            local new_path="$dest_dir/$pkg_name"
-            echo -e "${YELLOW}Renombrando carpeta '$old_name' a '$pkg_name'...${NC}"
-            mv "$old_path" "$new_path"
-        fi
-    fi
+    case "$extension" in
+        zip)
+            (cd "$parent_dir" && zip -qr "$archive_path" "$folder_name")
+            ;;
+        tar.gz|tgz)
+            (cd "$parent_dir" && tar -czf "$archive_path" "$folder_name")
+            ;;
+        tar.xz|txz)
+            (cd "$parent_dir" && tar -cJf "$archive_path" "$folder_name")
+            ;;
+        tar.bz2|tbz2)
+            (cd "$parent_dir" && tar -cjf "$archive_path" "$folder_name")
+            ;;
+        tar)
+            (cd "$parent_dir" && tar -cf "$archive_path" "$folder_name")
+            ;;
+        *)
+            echo -e "${RED}Error: Extensión de empaquetado no soportada: $extension${NC}" >&2
+            return 1
+            ;;
+    esac
 }
 
 # ------------------------------------------------------------
@@ -232,9 +211,7 @@ download_one() {
         return 1
     fi
 
-    # ------------------------------------------------------------
-    # Manejo de paquetes externos (external_metadata)
-    # ------------------------------------------------------------
+    # Manejo de paquetes externos
     if [[ "$download_url" == "external" || -z "$download_url" ]]; then
         data_file="$CASATA_ROOT/data/${pkg}.json"
         if [ ! -f "$data_file" ]; then
@@ -246,7 +223,7 @@ download_one() {
         if [[ "$external_metadata" == "true" ]]; then
             download_url=$(jq -r '.release.url // empty' "$data_file" 2>/dev/null || true)
             if [ -z "$download_url" ]; then
-                echo -e "${RED}Error: external_metadata es true pero no se encontró 'release.url' en los datos.${NC}" >&2
+                echo -e "${RED}Error: external_metadata es true pero no se encontró 'release.url'.${NC}" >&2
                 return 1
             fi
             echo -e "${YELLOW}Usando URL de release oficial: $download_url${NC}"
@@ -262,19 +239,135 @@ download_one() {
         return 1
     fi
 
-    # Extraer la extensión del archivo remoto
     file_ext=$(get_file_extension "$download_url")
     if [ -z "$file_ext" ]; then
         echo -e "${RED}Error: No se pudo determinar la extensión del archivo para '$pkg'.${NC}" >&2
         return 1
     fi
 
-    # Formato: <nombre_paquete>.<extensión>.casata
     final_filename="${pkg}.${file_ext}.casata"
     final_path="$DOWNLOAD_DIR/$final_filename"
 
     mkdir -p "$DOWNLOAD_DIR"
 
+    # ------------------------------------------------------------------
+    # Caso especial: paquete externo con metadatos adicionales
+    # ------------------------------------------------------------------
+    if [ -n "$data_file" ]; then
+        echo -e "${GREEN}Descargando release oficial y preparando paquete completo...${NC}"
+        local temp_release="$DOWNLOAD_DIR/.release_$$"
+        local temp_extract="$DOWNLOAD_DIR/.extract_$$"
+        mkdir -p "$temp_extract"
+
+        # 1) Descargar release
+        if ! wget -q --show-progress --timeout=30 --tries=2 -O "$temp_release" "$download_url"; then
+            echo -e "${RED}Error: Falló la descarga de '$pkg'.${NC}" >&2
+            rm -f "$temp_release" "$temp_extract" 2>/dev/null || true
+            return 1
+        fi
+
+        # 2) Extraer
+        if ! extract_archive "$temp_release" "$temp_extract" "$original_filename"; then
+            echo -e "${RED}Error: No se pudo descomprimir '$original_filename'.${NC}" >&2
+            rm -rf "$temp_release" "$temp_extract"
+            return 1
+        fi
+
+        # 3) Detectar la carpeta raíz (como hace Dolphin: si hay una única carpeta y no hay archivos sueltos)
+        local root_dir=""
+        local count_dirs=0
+        local count_files=0
+        local first_dir=""
+        for item in "$temp_extract"/*; do
+            if [ -d "$item" ]; then
+                count_dirs=$((count_dirs+1))
+                first_dir="$item"
+            elif [ -f "$item" ]; then
+                count_files=$((count_files+1))
+            fi
+        done
+
+        if [ $count_dirs -eq 1 ] && [ $count_files -eq 0 ]; then
+            root_dir="$first_dir"
+            # Renombrar al nombre del paquete si es diferente
+            if [ "$(basename "$root_dir")" != "$pkg" ]; then
+                mv "$root_dir" "$temp_extract/$pkg"
+                root_dir="$temp_extract/$pkg"
+                echo -e "${YELLOW}Carpeta raíz renombrada a '$pkg'.${NC}"
+            fi
+        else
+            root_dir="$temp_extract"
+        fi
+
+        # 4) Descargar archivos externos dentro de root_dir
+        local -a external_urls=()
+        while IFS= read -r url; do
+            [ -n "$url" ] && external_urls+=("$url")
+        done < <(jq -r '.external_files? // [] | .[]' "$data_file" 2>/dev/null || true)
+
+        if [ ${#external_urls[@]} -gt 0 ]; then
+            echo -e "${YELLOW}Descargando archivos externos...${NC}"
+            for url in "${external_urls[@]}"; do
+                local clean_url="${url%%\?*}"
+                local fname
+                fname=$(basename "$clean_url" 2>/dev/null || true)
+                if [ -z "$fname" ] || [ "$fname" == "/" ]; then
+                    fname="external_file_$(date +%s%N)"
+                fi
+                echo -e "   ${YELLOW}→ $fname${NC}"
+                if ! wget -q --show-progress -O "$root_dir/$fname" "$url"; then
+                    echo -e "${RED}Error al descargar $url${NC}" >&2
+                fi
+            done
+        fi
+
+        # 5) Generar GUIDE.json si hay campo 'guide'
+        local guide_array
+        guide_array=$(jq -c '.guide // empty' "$data_file" 2>/dev/null || true)
+        if [ -n "$guide_array" ] && [ "$guide_array" != "[]" ] && [ "$guide_array" != "null" ]; then
+            if [ ! -f "$root_dir/GUIDE.json" ]; then
+                echo -e "${YELLOW}Generando GUIDE.json...${NC}"
+                if jq -n --argjson links "$guide_array" '{links: $links}' > "$root_dir/GUIDE.json"; then
+                    echo -e "${GREEN}✔ GUIDE.json creado.${NC}"
+                else
+                    echo -e "${RED}Error al generar GUIDE.json.${NC}" >&2
+                fi
+            fi
+        fi
+
+        # 6) Decidir si empaquetar o extraer
+        if [ "$extract" -eq 1 ]; then
+            # Mover la carpeta raíz al destino final
+            local dest_pkg_dir="$DOWNLOAD_DIR/$pkg"
+            if [ -d "$dest_pkg_dir" ]; then
+                rm -rf "$dest_pkg_dir"
+            fi
+            mv "$root_dir" "$dest_pkg_dir"
+            echo -e "${GREEN}✔ Paquete extraído en: ${YELLOW}$DOWNLOAD_DIR${NC}"
+            log_event "EXTRACT" "package=\"$pkg\" destination=\"$DOWNLOAD_DIR\" status=OK"
+        else
+            # Empaquetar de nuevo
+            local final_pack_path="$final_path"
+            if [ -f "$final_pack_path" ]; then
+                rm -f "$final_pack_path"
+            fi
+            if ! pack_archive "$root_dir" "$final_pack_path" "$file_ext"; then
+                echo -e "${RED}Error al empaquetar el paquete final.${NC}" >&2
+                rm -rf "$temp_release" "$temp_extract"
+                return 1
+            fi
+            echo -e "${GREEN}✔ Paquete completo guardado: ${YELLOW}$final_filename${NC}"
+            log_download "$download_url" "$final_pack_path" "OK"
+        fi
+
+        # Limpiar temporales
+        rm -rf "$temp_release" "$temp_extract"
+        return 0
+    fi
+
+    # ------------------------------------------------------------------
+    # Caso normal: paquete sin metadatos externos
+    # ------------------------------------------------------------------
     echo -e "${GREEN}Descargando '$pkg'...${NC}"
     echo -e "  URL:     ${YELLOW}$download_url${NC}"
     echo -e "  Destino: ${YELLOW}$final_path${NC}"
@@ -298,34 +391,25 @@ download_one() {
 
     if [ "$extract" -eq 1 ]; then
         echo -e "${YELLOW}Descomprimiendo '$final_filename'...${NC}"
-        if ! extract_archive "$final_path" "$DOWNLOAD_DIR" "$original_filename"; then
+        local temp_extract="$DOWNLOAD_DIR/.extract_$$"
+        mkdir -p "$temp_extract"
+        if ! extract_archive "$final_path" "$temp_extract" "$original_filename"; then
             echo -e "${RED}Error: No se pudo descomprimir '$final_filename'.${NC}" >&2
+            rm -rf "$temp_extract"
             return 1
         fi
         rm -f "$final_path"
 
-        # Renombrar carpeta raíz si es necesario
-        rename_extracted_root "$DOWNLOAD_DIR" "$pkg"
-
-        # ------------------------------------------------------------
-        # Generar GUIDE.json en la carpeta extraída si hay metadatos guide
-        # ------------------------------------------------------------
-        if [ -n "$data_file" ]; then
-            local guide_array
-            guide_array=$(jq -c '.guide // empty' "$data_file" 2>/dev/null || true)
-            if [ -n "$guide_array" ] && [ "$guide_array" != "[]" ] && [ "$guide_array" != "null" ]; then
-                local extracted_root
-                extracted_root=$(find_extracted_root "$DOWNLOAD_DIR")
-                if [ -n "$extracted_root" ] && [ ! -f "$extracted_root/GUIDE.json" ]; then
-                    echo -e "${YELLOW}Generando GUIDE.json en la carpeta extraída...${NC}"
-                    if jq -n --argjson links "$guide_array" '{links: $links}' > "$extracted_root/GUIDE.json"; then
-                        echo -e "${GREEN}✔ GUIDE.json creado en $extracted_root${NC}"
-                    else
-                        echo -e "${RED}Error al generar GUIDE.json.${NC}" >&2
-                    fi
-                fi
-            fi
+        # Mover contenido a carpeta con nombre del paquete (si no existe)
+        local pkg_dir="$DOWNLOAD_DIR/$pkg"
+        if [ -d "$pkg_dir" ]; then
+            rm -rf "$pkg_dir"
         fi
+        mkdir -p "$pkg_dir"
+        shopt -s dotglob nullglob
+        mv "$temp_extract"/* "$pkg_dir"/ 2>/dev/null || true
+        shopt -u dotglob nullglob
+        rm -rf "$temp_extract"
 
         echo -e "${GREEN}✔ Paquete extraído en: ${YELLOW}$DOWNLOAD_DIR${NC}"
         log_event "EXTRACT" "package=\"$pkg\" destination=\"$DOWNLOAD_DIR\" status=OK"
@@ -385,7 +469,7 @@ if [ ${#PACKAGES[@]} -eq 0 ]; then
     exit 1
 fi
 
-# Determinar el home del usuario real (incluso con sudo)
+# Determinar el home del usuario real
 TARGET_USER_HOME="${HOME:-/root}"
 if [ "${EUID:-0}" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
     detected="$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6 || true)"
@@ -394,7 +478,6 @@ if [ "${EUID:-0}" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
     fi
 fi
 
-# Resolver la carpeta de destino
 if [ -n "$CUSTOM_PATH" ]; then
     DOWNLOAD_DIR="$(expand_download_path "$CUSTOM_PATH" "$TARGET_USER_HOME")"
 else
