@@ -10,7 +10,7 @@ COMANDOS:
   add community                          → Añade los metarepos de la comunidad, no son supervisados por Lynds Corp.
   add others                             → Añade los metarepos que no encajan en ninguna de las categorías anteriores
 
-  install <apps> [-y] [-d]               → -d = download, no lo instala (crear symlinks a rutas del sistema)
+  install <apps> [-y]                    → -y = yes, aceptar todo. Perfecto para automatización
   remove  <apps> [-y]                    → -y = yes, aceptar todo. Perfecto para automatización
 
   list [-v] [-d]                         → Muestra las apps instaladas (v = versión|d = descripción)
