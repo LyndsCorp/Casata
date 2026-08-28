@@ -89,7 +89,7 @@ if UseCustomPath == true then
     echo
     success("----------------------------------------------------------------------------------")
     success("¡Casata instalado correctamente!")
-    warn("Versión:")
+    printf "Versión: "
     cat "$CustomPath/usr/local/casata/VERSION"
 
     echo
