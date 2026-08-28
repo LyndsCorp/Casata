@@ -1051,6 +1051,23 @@ install_one() {
         download_external_files "$APP_DIR" EXTERNAL_FILES || return 1
     fi
 
+    # ------------------------------------------------------------------
+    # NUEVO: Generar GUIDE.json desde el campo 'guide' del JSON si existe
+    # ------------------------------------------------------------------
+    local guide_array
+    guide_array=$(jq -c '.guide // empty' "$PKG_FILE" 2>/dev/null || true)
+    if [ -n "$guide_array" ] && [ "$guide_array" != "[]" ] && [ "$guide_array" != "null" ]; then
+        if [ ! -f "$APP_DIR/GUIDE.json" ]; then
+            echo -e "${YELLOW}Generando GUIDE.json desde los metadatos del paquete...${NC}"
+            if ! jq -n --argjson links "$guide_array" '{links: $links}' > "$APP_DIR/GUIDE.json"; then
+                echo -e "${RED}Error al generar GUIDE.json.${NC}"
+                return 1
+            fi
+        else
+            echo -e "${YELLOW}Ya existe GUIDE.json en el paquete, se usará ese.${NC}"
+        fi
+    fi
+
     create_symlinks "$APP_DIR" "$GUIDE_TARGET" "$PKG_NAME" "$AUTO_YES"
     maybe_run_guide "$PKG_NAME" "$APP_DIR" "$AUTO_YES" "$REPO_VERSION"
 
@@ -1158,6 +1175,8 @@ install_from_file() {
                 split_to_array PIP_DEPS "$(jq -r '.pip? // [] | .[]' "$global_json" 2>/dev/null || true)" || true
                 split_to_array CASATA_DEPS "$(jq -r '.casata? // [] | .[]' "$global_json" 2>/dev/null || true)" || true
                 split_to_array EXTERNAL_FILES "$(jq -r '.external_files? // [] | .[]' "$global_json" 2>/dev/null || true)" || true
+                # También leer 'guide' del global si existe
+                GUIDE_ARRAY=$(jq -c '.guide // empty' "$global_json" 2>/dev/null || true)
             else
                 echo -e "${YELLOW}Advertencia: El archivo de base de datos global '$global_json' no es un JSON válido. Intentando con VERSION...${NC}"
                 local version_file="$SRC_DIR/VERSION"
