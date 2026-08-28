@@ -182,6 +182,32 @@ find_extracted_root() {
 }
 
 # ------------------------------------------------------------
+# Renombrar la carpeta raíz extraída al nombre del paquete
+# Solo si hay una única carpeta y su nombre difiere
+# ------------------------------------------------------------
+rename_extracted_root() {
+    local dest_dir="$1"
+    local pkg_name="$2"
+
+    # Listar elementos de primer nivel (solo directorios)
+    local -a top_dirs=()
+    while IFS= read -r dir; do
+        top_dirs+=("$dir")
+    done < <(find "$dest_dir" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null)
+
+    # Solo renombrar si hay exactamente un directorio
+    if [ ${#top_dirs[@]} -eq 1 ]; then
+        local old_name="${top_dirs[0]}"
+        if [ "$old_name" != "$pkg_name" ]; then
+            local old_path="$dest_dir/$old_name"
+            local new_path="$dest_dir/$pkg_name"
+            echo -e "${YELLOW}Renombrando carpeta '$old_name' a '$pkg_name'...${NC}"
+            mv "$old_path" "$new_path"
+        fi
+    fi
+}
+
+# ------------------------------------------------------------
 # Descargar un paquete
 # ------------------------------------------------------------
 download_one() {
@@ -277,6 +303,9 @@ download_one() {
             return 1
         fi
         rm -f "$final_path"
+
+        # Renombrar carpeta raíz si es necesario
+        rename_extracted_root "$DOWNLOAD_DIR" "$pkg"
 
         # ------------------------------------------------------------
         # Generar GUIDE.json en la carpeta extraída si hay metadatos guide
