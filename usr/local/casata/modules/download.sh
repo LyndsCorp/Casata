@@ -156,12 +156,39 @@ extract_archive() {
 }
 
 # ------------------------------------------------------------
+# Encontrar la carpeta raíz del contenido extraído
+# Similar a la lógica en install.sh
+# ------------------------------------------------------------
+find_extracted_root() {
+    local base_dir="$1"
+    local root
+
+    # Buscar carpeta que contenga VERSION
+    root=$(find "$base_dir" -maxdepth 3 -name "VERSION" -printf '%h\n' 2>/dev/null | head -1)
+    if [ -n "$root" ]; then
+        echo "$root"
+        return 0
+    fi
+
+    # Si no hay VERSION, tomar la primera subcarpeta
+    root=$(find "$base_dir" -mindepth 1 -maxdepth 1 -type d | head -1)
+    if [ -n "$root" ]; then
+        echo "$root"
+        return 0
+    fi
+
+    # Si no hay subcarpeta, usar el propio directorio
+    echo "$base_dir"
+}
+
+# ------------------------------------------------------------
 # Descargar un paquete
 # ------------------------------------------------------------
 download_one() {
     local pkg="$1"
     local extract="$2"
     local download_url original_filename file_ext final_filename final_path
+    local data_file=""
 
     if [[ "$pkg" == */* ]]; then
         echo -e "${RED}Error: Nombre de paquete inválido: '$pkg'.${NC}" >&2
@@ -183,7 +210,7 @@ download_one() {
     # Manejo de paquetes externos (external_metadata)
     # ------------------------------------------------------------
     if [[ "$download_url" == "external" || -z "$download_url" ]]; then
-        local data_file="$CASATA_ROOT/data/${pkg}.json"
+        data_file="$CASATA_ROOT/data/${pkg}.json"
         if [ ! -f "$data_file" ]; then
             echo -e "${RED}Error: No se encontró el archivo de datos para '$pkg'.${NC}" >&2
             return 1
@@ -250,6 +277,27 @@ download_one() {
             return 1
         fi
         rm -f "$final_path"
+
+        # ------------------------------------------------------------
+        # Generar GUIDE.json en la carpeta extraída si hay metadatos guide
+        # ------------------------------------------------------------
+        if [ -n "$data_file" ]; then
+            local guide_array
+            guide_array=$(jq -c '.guide // empty' "$data_file" 2>/dev/null || true)
+            if [ -n "$guide_array" ] && [ "$guide_array" != "[]" ] && [ "$guide_array" != "null" ]; then
+                local extracted_root
+                extracted_root=$(find_extracted_root "$DOWNLOAD_DIR")
+                if [ -n "$extracted_root" ] && [ ! -f "$extracted_root/GUIDE.json" ]; then
+                    echo -e "${YELLOW}Generando GUIDE.json en la carpeta extraída...${NC}"
+                    if jq -n --argjson links "$guide_array" '{links: $links}' > "$extracted_root/GUIDE.json"; then
+                        echo -e "${GREEN}✔ GUIDE.json creado en $extracted_root${NC}"
+                    else
+                        echo -e "${RED}Error al generar GUIDE.json.${NC}" >&2
+                    fi
+                fi
+            fi
+        fi
+
         echo -e "${GREEN}✔ Paquete extraído en: ${YELLOW}$DOWNLOAD_DIR${NC}"
         log_event "EXTRACT" "package=\"$pkg\" destination=\"$DOWNLOAD_DIR\" status=OK"
     fi
