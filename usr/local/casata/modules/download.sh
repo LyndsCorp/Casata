@@ -179,9 +179,28 @@ download_one() {
         return 1
     fi
 
-    if [ -z "$download_url" ]; then
-        echo -e "${RED}Error: El singrepo de '$pkg' no tiene download_url.${NC}" >&2
-        return 1
+    # ------------------------------------------------------------
+    # Manejo de paquetes externos (external_metadata)
+    # ------------------------------------------------------------
+    if [[ "$download_url" == "external" || -z "$download_url" ]]; then
+        local data_file="$CASATA_ROOT/data/${pkg}.json"
+        if [ ! -f "$data_file" ]; then
+            echo -e "${RED}Error: No se encontró el archivo de datos para '$pkg'.${NC}" >&2
+            return 1
+        fi
+        local external_metadata
+        external_metadata=$(jq -r '.external_metadata // false' "$data_file" 2>/dev/null || echo "false")
+        if [[ "$external_metadata" == "true" ]]; then
+            download_url=$(jq -r '.release.url // empty' "$data_file" 2>/dev/null || true)
+            if [ -z "$download_url" ]; then
+                echo -e "${RED}Error: external_metadata es true pero no se encontró 'release.url' en los datos.${NC}" >&2
+                return 1
+            fi
+            echo -e "${YELLOW}Usando URL de release oficial: $download_url${NC}"
+        else
+            echo -e "${RED}Error: El paquete no tiene download_url directa y no es un paquete externo válido.${NC}" >&2
+            return 1
+        fi
     fi
 
     original_filename=$(basename "$download_url" | cut -d '?' -f1)
