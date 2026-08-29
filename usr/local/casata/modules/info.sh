@@ -37,22 +37,45 @@ resolve_version() {
     fi
 }
 
-# Parsear argumentos
+# Parsear argumentos (permite flag antes o después del nombre)
 FLAG=""
 PKG_NAME=""
-
-if [[ "$1" == "-l" || "$1" == "--license-short" ]]; then
-    FLAG="license-short"
-    PKG_NAME=$2
-elif [[ "$1" == "-L" || "$1" == "--license-full" ]]; then
-    FLAG="license-full"
-    PKG_NAME=$2
-elif [[ "$1" == "-r" || "$1" == "--readme" ]]; then
-    FLAG="readme"
-    PKG_NAME=$2
-else
-    PKG_NAME=$1
-fi
+for arg in "$@"; do
+    case "$arg" in
+        -r|--readme)
+            if [ -n "$FLAG" ]; then
+                echo -e "${RED}Error: Solo se permite un flag.${NC}" >&2
+                exit 1
+            fi
+            FLAG="readme"
+            ;;
+        -l|--license-short)
+            if [ -n "$FLAG" ]; then
+                echo -e "${RED}Error: Solo se permite un flag.${NC}" >&2
+                exit 1
+            fi
+            FLAG="license-short"
+            ;;
+        -L|--license-full)
+            if [ -n "$FLAG" ]; then
+                echo -e "${RED}Error: Solo se permite un flag.${NC}" >&2
+                exit 1
+            fi
+            FLAG="license-full"
+            ;;
+        -*)
+            echo -e "${RED}Error: Opción desconocida: $arg${NC}" >&2
+            exit 1
+            ;;
+        *)
+            if [ -n "$PKG_NAME" ]; then
+                echo -e "${RED}Error: Demasiados argumentos.${NC}" >&2
+                exit 1
+            fi
+            PKG_NAME="$arg"
+            ;;
+    esac
+done
 
 [ -z "$PKG_NAME" ] && { echo -e "${RED}Error: Falta el nombre del paquete.${NC}"; exit 1; }
 
@@ -75,7 +98,7 @@ if [ -n "$FLAG" ]; then
     case "$FLAG" in
         "license-short")
             if [ -f "$APP_DIR/LICENSE" ]; then
-                echo -e "${YELLOW}=== LICENCIA (primera línea) de $PKG_NAME ===${NC}"
+                echo -e "${YELLOW}=== LICENCIA (primera línea, -L para entera) de $PKG_NAME ===${NC}"
                 head -n 1 "$APP_DIR/LICENSE"
                 exit 0
             else

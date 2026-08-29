@@ -184,38 +184,55 @@ show_app_info() {
 }
 
 # ------------------------------------------------------------
-# Parseo de argumentos (nuevo)
+# Parseo de argumentos (permite flag antes o después del nombre)
 # ------------------------------------------------------------
 FLAG=""
 PKG_NAME=""
-
-if [[ "$1" == "-r" || "$1" == "--readme" ]]; then
-    FLAG="readme"
-    shift
-elif [[ "$1" == "-l" || "$1" == "--license-short" ]]; then
-    FLAG="license-short"
-    shift
-elif [[ "$1" == "-L" || "$1" == "--license-full" ]]; then
-    FLAG="license-full"
-    shift
-fi
-
-if [ -n "$FLAG" ]; then
-    if [ $# -ne 1 ]; then
-        echo -e "${RED}Error: Se requiere el nombre del paquete después de la opción.${NC}"
-        exit 1
-    fi
-    PKG_NAME="$1"
-else
-    if [ $# -eq 1 ]; then
-        PKG_NAME="$1"
-    fi
-fi
+for arg in "$@"; do
+    case "$arg" in
+        -r|--readme)
+            if [ -n "$FLAG" ]; then
+                echo -e "${RED}Error: Solo se permite un flag.${NC}" >&2
+                exit 1
+            fi
+            FLAG="readme"
+            ;;
+        -l|--license-short)
+            if [ -n "$FLAG" ]; then
+                echo -e "${RED}Error: Solo se permite un flag.${NC}" >&2
+                exit 1
+            fi
+            FLAG="license-short"
+            ;;
+        -L|--license-full)
+            if [ -n "$FLAG" ]; then
+                echo -e "${RED}Error: Solo se permite un flag.${NC}" >&2
+                exit 1
+            fi
+            FLAG="license-full"
+            ;;
+        -*)
+            echo -e "${RED}Error: Opción desconocida: $arg${NC}" >&2
+            exit 1
+            ;;
+        *)
+            if [ -n "$PKG_NAME" ]; then
+                echo -e "${RED}Error: Demasiados argumentos.${NC}" >&2
+                exit 1
+            fi
+            PKG_NAME="$arg"
+            ;;
+    esac
+done
 
 # ------------------------------------------------------------
 # Manejo de flags: mostrar archivos solicitados
 # ------------------------------------------------------------
 if [ -n "$FLAG" ]; then
+    if [ -z "$PKG_NAME" ]; then
+        echo -e "${RED}Error: Se requiere el nombre del paquete.${NC}" >&2
+        exit 1
+    fi
     APP_DIR="$SYS_DIR/$PKG_NAME"
     if [ ! -d "$APP_DIR" ]; then
         echo -e "${RED}Error: La aplicación '$PKG_NAME' no está instalada globalmente.${NC}"
@@ -235,7 +252,7 @@ if [ -n "$FLAG" ]; then
             ;;
         "license-short")
             if [ -f "$APP_DIR/LICENSE" ]; then
-                echo -e "${YELLOW}=== LICENCIA (primera línea) de $PKG_NAME ===${NC}"
+                echo -e "${YELLOW}=== LICENCIA (primera línea, -L para entera) de $PKG_NAME ===${NC}"
                 head -n 1 "$APP_DIR/LICENSE"
                 exit 0
             else
