@@ -45,7 +45,7 @@ COMANDOS:
        random                            → Muestra un mensaje del día local aleatorio
 
 
-  sudo casata motd                              → Actualiza el mensaje del día con el remoto
+  sudo casata motd                       → Actualiza el mensaje del día con el remoto
 
 OPCIONES COMUNES:
   -y          → responde "sí" a todo
