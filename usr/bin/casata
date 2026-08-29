@@ -191,11 +191,11 @@ case "$COMMAND" in
         ;;
 
     show)
-        run_module "show.sh" "$1"
+        run_module "show.sh" "$@"
         ;;
 
     list)
-        run_module "list.sh" "$1"
+        run_module "list.sh" "$@"
         ;;
 
     download)

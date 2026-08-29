@@ -2,6 +2,7 @@
 # /usr/local/casata/modules/show.sh
 # Muestra información técnica de las aplicaciones instaladas globalmente
 # incluyendo tamaños, metadatos y metarepo de origen.
+# Ahora también permite leer README y LICENCIAS.
 
 shopt -s nullglob
 
@@ -45,7 +46,6 @@ find_metarepo_for_pkg() {
     if [ -d "$METAREPOS_DIR" ]; then
         for meta_file in "$METAREPOS_DIR"/*.json; do
             [ -f "$meta_file" ] || continue
-            # Usar jq con --arg para verificar si la clave existe
             if jq -e --arg pkg "$pkg_name" 'has($pkg)' "$meta_file" >/dev/null 2>&1; then
                 local repo_name=$(jq -r '.name // ""' "$meta_file" 2>/dev/null)
                 if [ -z "$repo_name" ]; then
@@ -183,14 +183,89 @@ show_app_info() {
     echo ""
 }
 
-# Si se pasa un argumento, mostrar solo esa app
-if [ $# -eq 1 ]; then
-    pkg_name="$1"
-    app_dir="$SYS_DIR/$pkg_name"
+# ------------------------------------------------------------
+# Parseo de argumentos (nuevo)
+# ------------------------------------------------------------
+FLAG=""
+PKG_NAME=""
+
+if [[ "$1" == "-r" || "$1" == "--readme" ]]; then
+    FLAG="readme"
+    shift
+elif [[ "$1" == "-l" || "$1" == "--license-short" ]]; then
+    FLAG="license-short"
+    shift
+elif [[ "$1" == "-L" || "$1" == "--license-full" ]]; then
+    FLAG="license-full"
+    shift
+fi
+
+if [ -n "$FLAG" ]; then
+    if [ $# -ne 1 ]; then
+        echo -e "${RED}Error: Se requiere el nombre del paquete después de la opción.${NC}"
+        exit 1
+    fi
+    PKG_NAME="$1"
+else
+    if [ $# -eq 1 ]; then
+        PKG_NAME="$1"
+    fi
+fi
+
+# ------------------------------------------------------------
+# Manejo de flags: mostrar archivos solicitados
+# ------------------------------------------------------------
+if [ -n "$FLAG" ]; then
+    APP_DIR="$SYS_DIR/$PKG_NAME"
+    if [ ! -d "$APP_DIR" ]; then
+        echo -e "${RED}Error: La aplicación '$PKG_NAME' no está instalada globalmente.${NC}"
+        exit 1
+    fi
+
+    case "$FLAG" in
+        "readme")
+            if [ -f "$APP_DIR/README.md" ]; then
+                echo -e "${YELLOW}=== README de $PKG_NAME ===${NC}"
+                cat "$APP_DIR/README.md"
+                exit 0
+            else
+                echo -e "${RED}No se encontró el archivo README.md en $PKG_NAME.${NC}"
+                exit 1
+            fi
+            ;;
+        "license-short")
+            if [ -f "$APP_DIR/LICENSE" ]; then
+                echo -e "${YELLOW}=== LICENCIA (primera línea) de $PKG_NAME ===${NC}"
+                head -n 1 "$APP_DIR/LICENSE"
+                exit 0
+            else
+                echo -e "${RED}No se encontró el archivo LICENSE en $PKG_NAME.${NC}"
+                exit 1
+            fi
+            ;;
+        "license-full")
+            if [ -f "$APP_DIR/LICENSE" ]; then
+                echo -e "${YELLOW}=== LICENCIA completa de $PKG_NAME ===${NC}"
+                cat "$APP_DIR/LICENSE"
+                exit 0
+            else
+                echo -e "${RED}No se encontró el archivo LICENSE en $PKG_NAME.${NC}"
+                exit 1
+            fi
+            ;;
+    esac
+fi
+
+# ------------------------------------------------------------
+# Sin flags: comportamiento original
+# ------------------------------------------------------------
+# Si se pasa un argumento (nombre de paquete), mostrar solo esa app
+if [ -n "$PKG_NAME" ]; then
+    app_dir="$SYS_DIR/$PKG_NAME"
     if [ -d "$app_dir" ]; then
         show_app_info "$app_dir"
     else
-        echo -e "${RED}Error: La aplicación '$pkg_name' no está instalada globalmente.${NC}"
+        echo -e "${RED}Error: La aplicación '$PKG_NAME' no está instalada globalmente.${NC}"
         exit 1
     fi
     exit 0

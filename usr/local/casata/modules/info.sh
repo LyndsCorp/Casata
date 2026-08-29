@@ -41,8 +41,11 @@ resolve_version() {
 FLAG=""
 PKG_NAME=""
 
-if [[ "$1" == "-l" || "$1" == "--license" ]]; then
-    FLAG="license"
+if [[ "$1" == "-l" || "$1" == "--license-short" ]]; then
+    FLAG="license-short"
+    PKG_NAME=$2
+elif [[ "$1" == "-L" || "$1" == "--license-full" ]]; then
+    FLAG="license-full"
     PKG_NAME=$2
 elif [[ "$1" == "-r" || "$1" == "--readme" ]]; then
     FLAG="readme"
@@ -69,18 +72,38 @@ if [ -n "$FLAG" ]; then
         exit 1
     fi
 
-    if [ "$FLAG" == "license" ] && [ -f "$APP_DIR/LICENSE" ]; then
-        echo -e "${YELLOW}=== LICENCIA de $PKG_NAME ===${NC}"
-        cat "$APP_DIR/LICENSE"
-        exit 0
-    elif [ "$FLAG" == "readme" ] && [ -f "$APP_DIR/README.md" ]; then
-        echo -e "${YELLOW}=== README de $PKG_NAME ===${NC}"
-        cat "$APP_DIR/README.md"
-        exit 0
-    else
-        echo -e "${RED}El archivo solicitado no se encontró en la instalación de $PKG_NAME.${NC}"
-        exit 1
-    fi
+    case "$FLAG" in
+        "license-short")
+            if [ -f "$APP_DIR/LICENSE" ]; then
+                echo -e "${YELLOW}=== LICENCIA (primera línea) de $PKG_NAME ===${NC}"
+                head -n 1 "$APP_DIR/LICENSE"
+                exit 0
+            else
+                echo -e "${RED}No se encontró el archivo LICENSE en $PKG_NAME.${NC}"
+                exit 1
+            fi
+            ;;
+        "license-full")
+            if [ -f "$APP_DIR/LICENSE" ]; then
+                echo -e "${YELLOW}=== LICENCIA completa de $PKG_NAME ===${NC}"
+                cat "$APP_DIR/LICENSE"
+                exit 0
+            else
+                echo -e "${RED}No se encontró el archivo LICENSE en $PKG_NAME.${NC}"
+                exit 1
+            fi
+            ;;
+        "readme")
+            if [ -f "$APP_DIR/README.md" ]; then
+                echo -e "${YELLOW}=== README de $PKG_NAME ===${NC}"
+                cat "$APP_DIR/README.md"
+                exit 0
+            else
+                echo -e "${RED}No se encontró el archivo README.md en $PKG_NAME.${NC}"
+                exit 1
+            fi
+            ;;
+    esac
 fi
 
 # Extraer datos de la base de datos
