@@ -49,7 +49,6 @@ COMANDOS:
 
 OPCIONES COMUNES:
   -y          → responde "sí" a todo
-  -d          → solo descarga (install)
   -l / -r     → licencia / readme (info)
   -v / -d     → versión / descripción (list)
 
