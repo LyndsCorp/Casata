@@ -89,82 +89,39 @@ if [ $AUTO_YES -eq 0 ]; then
 fi
 
 TEMP_DIR=$(mktemp -d)
-ZIP_URL="https://github.com/LyndsCorp/Casata/archive/refs/heads/main.zip"
+TARBALL_URL="https://github.com/LyndsCorp/Casata/archive/refs/heads/main.tar.gz"
 echo -e "${YELLOW}Descargando desde GitHub...${NC}"
-if ! wget -q --show-progress -O "$TEMP_DIR/casata.zip" "$ZIP_URL"; then
+if ! wget -q --show-progress -O "$TEMP_DIR/casata.tar.gz" "$TARBALL_URL"; then
     echo -e "${RED}Error al descargar la actualización.${NC}"
     exit 1
 fi
 
-unzip -q "$TEMP_DIR/casata.zip" -d "$TEMP_DIR"
+echo -e "${YELLOW}Extrayendo archivos...${NC}"
+tar -xzf "$TEMP_DIR/casata.tar.gz" -C "$TEMP_DIR"
 EXTRACTED=$(find "$TEMP_DIR" -maxdepth 1 -type d -name "Casata-*" | head -1)
 if [ -z "$EXTRACTED" ] || [ ! -d "$EXTRACTED/usr" ]; then
-    echo -e "${RED}Error: Estructura del ZIP inválida.${NC}"
+    echo -e "${RED}Error: Estructura del archivo descargado inválida.${NC}"
     exit 1
 fi
 
-# ----------------------------------------------------------------------
-# NUEVO: Diagnóstico y limpieza de enlaces simbólicos problemáticos
-# ----------------------------------------------------------------------
-echo -e "${YELLOW}Verificando integridad del paquete extraído...${NC}"
-
-# Mostrar enlaces simbólicos (si los hay)
-symlinks_found=$(find "$EXTRACTED" -type l 2>/dev/null | wc -l)
-if [ "$symlinks_found" -gt 0 ]; then
-    echo -e "${YELLOW}Se encontraron $symlinks_found enlaces simbólicos. Se preservarán tal cual.${NC}"
-    # Listarlos para información
-    find "$EXTRACTED" -type l -exec ls -la {} \; 2>/dev/null | while read -r line; do
-        echo -e "  ${YELLOW}→ $line${NC}"
-    done
-else
-    echo -e "${GREEN}No se encontraron enlaces simbólicos.${NC}"
-fi
-
-# Buscar rutas extremadamente largas (posible causa del error)
-echo -e "${YELLOW}Comprobando rutas largas...${NC}"
-long_paths=$(find "$EXTRACTED" -name '*' 2>/dev/null | awk '{ if (length($0) > 200) print length($0), $0 }')
-if [ -n "$long_paths" ]; then
-    echo -e "${RED}Se detectaron rutas muy largas, podrían causar errores:${NC}"
-    echo "$long_paths" | while read -r len path; do
-        echo -e "  ${RED}→ ($len caracteres) $path${NC}"
-    done
-    # No abortamos, pero avisamos
-else
-    echo -e "${GREEN}No se detectaron rutas excesivamente largas.${NC}"
-fi
-
-# ----------------------------------------------------------------------
-# Copiar binario principal
-# ----------------------------------------------------------------------
-echo -e "${YELLOW}Instalando binario principal...${NC}"
+# Instalar binario principal
 cp -f "$EXTRACTED/usr/bin/casata" /usr/bin/casata
 chmod +x /usr/bin/casata
 
-# ----------------------------------------------------------------------
 # Reemplazar módulos
-# ----------------------------------------------------------------------
-echo -e "${YELLOW}Actualizando módulos...${NC}"
 rm -rf "$GLOBAL_ROOT/modules"
 cp -a "$EXTRACTED/usr/local/casata/modules" "$GLOBAL_ROOT/"
 chmod +x "$GLOBAL_ROOT"/modules/*.sh
 
-# ----------------------------------------------------------------------
 # Reemplazar librerías
-# ----------------------------------------------------------------------
-echo -e "${YELLOW}Actualizando librerías...${NC}"
 rm -rf "$GLOBAL_ROOT/lib"
 cp -a "$EXTRACTED/usr/local/casata/lib" "$GLOBAL_ROOT/"
 chmod +x "$GLOBAL_ROOT"/lib/*.sh
 
-# ----------------------------------------------------------------------
 # Copiar archivos informativos
-# ----------------------------------------------------------------------
-echo -e "${YELLOW}Copiando archivos informativos...${NC}"
 cp -f "$EXTRACTED/usr/local/casata/"{HELP,VERSION,WELCOME,SAVE_FILES.txt} "$GLOBAL_ROOT/" 2>/dev/null
 
-# ----------------------------------------------------------------------
-# FUSIÓN DE REPOSITORIOS (sin borrar los locales)
-# ----------------------------------------------------------------------
+# Fusionar repositorios oficiales
 if [ -d "$EXTRACTED/usr/local/casata/repos" ]; then
     echo -e "${YELLOW}Fusionando repositorios oficiales (se conservan los personalizados)...${NC}"
     cp -a "$EXTRACTED/usr/local/casata/repos/." "$GLOBAL_ROOT/repos/"
@@ -172,7 +129,6 @@ if [ -d "$EXTRACTED/usr/local/casata/repos" ]; then
 else
     echo -e "${YELLOW}Aviso: No se encontró la carpeta 'repos' en la actualización; se mantiene la versión actual.${NC}"
 fi
-# ----------------------------------------------------------------------
 
 echo -e "${GREEN}Casata actualizado correctamente a la versión $REMOTE_VERSION.${NC}"
 exit 0
