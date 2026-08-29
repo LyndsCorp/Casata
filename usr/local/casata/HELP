@@ -15,9 +15,9 @@ COMANDOS:
 
   list [-v] [-d]                         → Muestra las apps instaladas (v = versión|d = descripción)
 
-  info <app> [-l] [-r]                   → Muestra información sobre la app (l = LICENSE|r = README.md)
+  info <app> [-l/-L] [-r]                → Muestra información sobre la app (l = --license-short/L = --license-full|r = README.md)
 
-  show <app>                             → Información técnica de cómo está instalada la aplicación
+  show <app> [-l/-L] [-r]                → Información técnica de cómo está instalada la aplicación (l = --license-short/L = --license-full|r = README.md)
 
   search <texto>                         → Busca en la base de datos local
 
