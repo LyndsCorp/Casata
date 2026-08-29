@@ -109,12 +109,12 @@ chmod +x /usr/bin/casata
 
 # Reemplazar módulos
 rm -rf "$GLOBAL_ROOT/modules"
-cp -r "$EXTRACTED/usr/local/casata/modules" "$GLOBAL_ROOT/"
+cp -a "$EXTRACTED/usr/local/casata/modules" "$GLOBAL_ROOT/"
 chmod +x "$GLOBAL_ROOT"/modules/*.sh
 
 # Reemplazar librerias
 rm -rf "$GLOBAL_ROOT/lib"
-cp -r "$EXTRACTED/usr/local/casata/lib" "$GLOBAL_ROOT/"
+cp -a "$EXTRACTED/usr/local/casata/lib" "$GLOBAL_ROOT/"
 chmod +x "$GLOBAL_ROOT"/lib/*.sh
 
 # Copiar archivos informativos
@@ -123,7 +123,7 @@ cp -f "$EXTRACTED/usr/local/casata/"{HELP,VERSION,WELCOME,SAVE_FILES.txt} "$GLOB
 # ===== FUSIÓN DE REPOSITORIOS (sin borrar los locales) =====
 if [ -d "$EXTRACTED/usr/local/casata/repos" ]; then
     echo -e "${YELLOW}Fusionando repositorios oficiales (se conservan los personalizados)...${NC}"
-    cp -r "$EXTRACTED/usr/local/casata/repos/." "$GLOBAL_ROOT/repos/"
+    cp -a "$EXTRACTED/usr/local/casata/repos/." "$GLOBAL_ROOT/repos/"
     echo -e "${GREEN}Repositorios actualizados correctamente.${NC}"
 else
     echo -e "${YELLOW}Aviso: No se encontró la carpeta 'repos' en la actualización; se mantiene la versión actual.${NC}"
