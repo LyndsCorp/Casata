@@ -1,10 +1,8 @@
 #!/bin/bash
 
 # Módulo motd para Casata
-# Muestra el Mensaje del Día almacenado en CASATA_ROOT/news/
-# Con sudo, descarga la última versión desde GitHub
-# Comandos añadidos: random, list y alias de días (español/inglés)
-# Casata 1.3.3.2
+# El casata motd list ahora te lo muestra de forma ordenada
+# Copyright (C) 2026 David Baña Szymaniak
 
 set -euo pipefail
 shopt -s nullglob
@@ -182,7 +180,7 @@ show_random_motd() {
     cat "$file"
 }
 
-# Lista todos los días con MOTD almacenados
+# Lista todos los días con MOTD almacenados (ordenados del más reciente al más antiguo)
 list_available_days() {
     if [ ! -d "$NEWS_DIR" ]; then
         echo "No hay mensajes del día disponibles."
@@ -194,10 +192,19 @@ list_available_days() {
         exit 0
     fi
     echo "Días disponibles:"
+<<<<<<< HEAD
+=======
+    # Extraer fechas, convertir a YYYYMMDD y ordenar descendentemente
+>>>>>>> d9e56a2 (casata motd list ahora te los muestra de forma ordenada)
     for f in "${files[@]}"; do
-        basename "$f" .txt
-    done | sort | while read -r d; do
-        echo "  $d"
+        base=$(basename "$f" .txt)
+        IFS='-' read -ra parts <<< "$base"
+        if [ ${#parts[@]} -eq 3 ]; then
+            # Forzar base 10 para días/meses con ceros delante
+            printf "%04d%02d%02d %s\n" "$((10#${parts[2]}))" "$((10#${parts[1]}))" "$((10#${parts[0]}))" "$base"
+        fi
+    done | sort -rn | while read -r sortkey original; do
+        echo "  $original"
     done
 }
 
