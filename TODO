@@ -1,28 +1,3 @@
-[X] Que el HISTORY.txt sea muchisimo más completo, diciendo usuarios, resultados, dependencias instaladas, comandos ejecutados, links creados... y todo eso. Basicamente una capsula del tiempo.
-
-[X] Que instalar más de un paquete a la vez resuelva las dependencias primero y luego instale todos los paquetes a la vez, en vez de instalarlos en orden y ejecutar varios apt update y apt install en la misma ejecución de Casata.
-
-[X] update.sh que puedas poner:
-    casata update <metarepo> y se actualiza solo ese metarepo
-
-[X] También que puedas instalar paquetes .casata con casata install --file archivos... (o -f) y esos .casata son archivos tar o cualquier forma de empaquetación. Esos .casata tienen VERSION, GUIDE.json... todo eso
-    Esto de --file podría ser un install-file.sh en vez de todo en el install.sh, enrutando como ya hace con el casata install casata al install-casata.sh o podriamos hacerlo en el install.sh igual para tener la misma lógica de los simlinks.
-
-[X] NUEVO download.sh que puedas poner:
-    casata download paquete
-    y solo se descarga el ZIP o TAR del paquete como $HOME/$DOWNLOADS_DIR/$PACKAGE
-    (DOWNLOADS_DIR hace caso al `XDG_DOWNLOAD_DIR="$HOME/Descargas"` de ~/.config/user-dirs.dirs)
-    Pero tambien que si pones
-    casata download --extract (o -e), descomprime el paquete y elimina el paquete comprimido.
-    El archivo se decarga como FILENAME.casata, manteniendo su extensión original tambien (ej. app.tar.gz.casata)
-
-[X] Que los metadatos de paquetes puedan tener el VERSION como una URL para solo tener que modificar el archivo VERSION del paquete.
-    Para distinguir, que mire las primeras 4 letras y si son "http" en vez de números, entonces es una URL.
-
-[X] Para facilitar la distribución de paquetes de terceros sin necesidad de hacer un fork o cosas así, que los metadatos puedan tener un campo que si es true, entonces Casata no va a utilizar metadatos en el paquete, sino todo del JSON del data.
-    Estos tendrían directamente el version y el GUIDE dentro del data en vez del paquete.
-    También que el data.json tenga una parte de que el paquete además de utilizar el release oficial, el distribuidor pueda añadir archivos propios que irán en el paquete antes de que la parte de GUIDE haga lo suyo. Sirve para por ejemplo utilizar las releases oficiales de Zen pero teniendo un .desktop propio (ya que las releases suelen no traer un .desktop)
-
 [ ] Permitir instalar paquetes .deb con cosas como
     sudo casata install app-deb
     y lo instala con APT.
