@@ -192,10 +192,7 @@ list_available_days() {
         exit 0
     fi
     echo "Días disponibles:"
-<<<<<<< HEAD
-=======
-    # Extraer fechas, convertir a YYYYMMDD y ordenar descendentemente
->>>>>>> d9e56a2 (casata motd list ahora te los muestra de forma ordenada)
+
     for f in "${files[@]}"; do
         base=$(basename "$f" .txt)
         IFS='-' read -ra parts <<< "$base"
