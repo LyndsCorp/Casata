@@ -664,6 +664,43 @@ download_external_files() {
 }
 
 # ------------------------------------------------------------
+# Preguntar si sobrescribir un enlace/archivo existente
+# ------------------------------------------------------------
+ask_overwrite() {
+    local target="$1"
+    local pkg_name="$2"
+    local auto_yes="$3"
+
+    # Si no existe nada, no hay nada que preguntar
+    if [ ! -e "$target" ] && [ ! -L "$target" ]; then
+        return 0
+    fi
+
+    if [ "$auto_yes" -eq 1 ]; then
+        echo -e "   ${YELLOW}[!] Sobrescribiendo '$target' existente (modo -y).${NC}"
+        rm -f -- "$target"
+        return 0
+    fi
+
+    if [ -L "$target" ]; then
+        echo -e "${YELLOW}   [!] Ya existe un enlace: $target -> $(readlink "$target")${NC}"
+    else
+        echo -e "${YELLOW}   [!] Ya existe un archivo: $target${NC}"
+    fi
+
+    local resp
+    read -p "   ¿Sobrescribir con el enlace de '$pkg_name'? [s/N] " resp < /dev/tty
+    if [[ "$resp" =~ ^[sSyY] ]]; then
+        rm -f -- "$target"
+        return 0
+    fi
+
+    echo -e "${YELLOW}   Omitiendo enlace.${NC}"
+    return 1
+}
+
+
+# ------------------------------------------------------------
 # Crear enlaces simbólicos según GUIDE.json con protecciones
 # ------------------------------------------------------------
 create_symlinks() {
