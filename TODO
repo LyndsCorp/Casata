@@ -1,5 +1,3 @@
-[ ] Que instalar un paquete desde un archivo lea el campo name del DATA.json
-
 [ ] Permitir instalar paquetes .deb con cosas como
     sudo casata install app-deb
     y lo instala con APT.
