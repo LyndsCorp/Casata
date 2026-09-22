@@ -1132,25 +1132,47 @@ install_from_file() {
         return 1
     fi
 
+    # Nombre provisional (fallback) desde el nombre del archivo
     local PKG_NAME
     PKG_NAME=$(normalize_pkg_name "$(basename "$ARCHIVE_FILE")")
 
-    APPS_DIR="$GLOBAL_ROOT/apps"
-    GUIDE_TARGET="GUIDE.json"
-    mkdir -p "$APPS_DIR"
-    APP_DIR="$APPS_DIR/$PKG_NAME"
-
+    # Preparar directorio temporal y extraer ANTES de fijar APP_DIR
     local temp_download_dir="$TEMP_BASE/install-file-$$"
     mkdir -p "$temp_download_dir"
     local extract_dir="$temp_download_dir/extract"
     mkdir -p "$extract_dir"
 
-    echo -e "${GREEN}Extrayendo $PKG_NAME desde archivo local...${NC}"
+    echo -e "${GREEN}Extrayendo paquete desde archivo local...${NC}"
     if ! extract_archive "$ARCHIVE_FILE" "$extract_dir"; then
         echo -e "${RED}Error al extraer el archivo.${NC}"
         rm -rf "$temp_download_dir"
         return 1
     fi
+
+    # Intentar leer el campo 'name' del DATA.json del paquete
+    local DATA_FILE="$SRC_DIR/DATA.json"
+    if [ -f "$DATA_FILE" ]; then
+        local json_name
+        json_name=$(jq -r '.name // empty' "$DATA_FILE" 2>/dev/null || true)
+        if [ -n "$json_name" ] && [ "$json_name" != "null" ]; then
+            local normalized_json_name
+            normalized_json_name=$(normalize_pkg_name "$json_name")
+            if [ -n "$normalized_json_name" ]; then
+                PKG_NAME="$normalized_json_name"
+                echo -e "${YELLOW}Nombre del paquete según sus metadatos: $PKG_NAME${NC}"
+            fi
+        else
+            echo -e "${YELLOW}Aviso: DATA.json no contiene el campo 'name'. Se usará el nombre del archivo: $PKG_NAME${NC}"
+        fi
+    else
+        echo -e "${YELLOW}Aviso: El paquete no contiene DATA.json. Se usará el nombre del archivo: $PKG_NAME${NC}"
+    fi
+
+    # Ahora sí, fijar rutas con el nombre correcto
+    APPS_DIR="$GLOBAL_ROOT/apps"
+    GUIDE_TARGET="GUIDE.json"
+    mkdir -p "$APPS_DIR"
+    APP_DIR="$APPS_DIR/$PKG_NAME"
 
     local REPO_VERSION=""
     local SHA256=""
@@ -1160,7 +1182,7 @@ install_from_file() {
     local RELEASE_URL=""
     local GUIDE_ARRAY=""
 
-    local DATA_FILE="$SRC_DIR/DATA.json"
+    # DATA_FILE ya está definido arriba; lo reutilizamos
     if [ -f "$DATA_FILE" ]; then
         echo -e "${YELLOW}Se encontró DATA.json, usando metadatos del paquete.${NC}"
 
