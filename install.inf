@@ -11,10 +11,10 @@ UseCustomPath = false
 
 function MostrarHelp()
     if YaMostrasteHelp == false then
-        success("Casata Installer Help")
+        print(color("green") + "Casata Installer Help")
         print("---------------------")
         echo
-        warn("Tienes que ejecutar este script como root (sudo)")
+        print(color("orange") + "Tienes que ejecutar este script como root (sudo)")
         print("Los flags son:")
         print("  --help (-h): muestra esta ayuda.")
         print("  --version (-v): muestra la versión que tienes en el paquete localmente.")
@@ -87,8 +87,8 @@ if UseCustomPath == true then
     cp -r usr/local/casata/ "$CustomPath/usr/local/"
     
     echo
-    success("----------------------------------------------------------------------------------")
-    success("¡Casata instalado correctamente!")
+    print(color("green") + "----------------------------------------------------------------------------------")
+    print(color("green") + "¡Casata instalado correctamente!")
     printf "Versión: "
     cat "$CustomPath/usr/local/casata/VERSION"
 
@@ -121,7 +121,7 @@ if NoInstalar == false then
 
     echo
     print("----------------------------------------------------------------------------------")
-    success("¡Casata instalado correctamente!")
+    print(color("green") + "¡Casata instalado correctamente!")
     printf "Versión: "
     cat /usr/local/casata/VERSION
 
