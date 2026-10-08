@@ -1,3 +1,7 @@
+[ ] Que en casata info, se puedan mostrar los paquetes instalados mediante --file
+[ ] Que no solo mire los metadatos de data/. Si este no existe, que mire en DATA.json del directorio del paquete.
+[ ] Si el archivo no tiene singrepo, se deduce que fue instalado mediate --file
+
 [ ] Permitir instalar paquetes .deb con cosas como
     sudo casata install app-deb
     y lo instala con APT.
