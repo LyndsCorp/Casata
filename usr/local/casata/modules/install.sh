@@ -86,6 +86,8 @@ resolve_version() {
 
 # ------------------------------------------------------------
 # Obtener extensión del archivo remoto (compuesta o simple)
+# (solo se usa para nombrar el archivo descargado; la extracción
+#  real NO depende de esto, se detecta por cabecera)
 # ------------------------------------------------------------
 get_file_extension() {
     local url="$1"
@@ -606,29 +608,107 @@ show_removal_summary() {
 }
 
 # ------------------------------------------------------------
+# Detectar formato de archivo por cabecera (magic bytes)
+# Devuelve por stdout: zip | tar.gz | tar.xz | tar.bz2 | tar
+# ------------------------------------------------------------
+detect_archive_format() {
+    local file="$1"
+    [ -f "$file" ] || return 1
+
+    # Leer 512 bytes (suficiente: el magic "ustar" del tar está en offset 257)
+    local header
+    header=$(od -An -tx1 -N 512 "$file" 2>/dev/null | tr -d ' \n') || header=""
+    [ -n "$header" ] || return 1
+
+    # ZIP: "PK\x03\x04" / "PK\x05\x06" (zip vacío) / "PK\x07\x08" (zip segmentado)
+    case "${header:0:8}" in
+        504b0304|504b0506|504b0708) echo "zip"; return 0 ;;
+    esac
+
+    # gzip: 1f 8b
+    if [ "${header:0:4}" = "1f8b" ]; then
+        echo "tar.gz"; return 0
+    fi
+
+    # xz: fd 37 7a 58 5a 00
+    if [ "${header:0:12}" = "fd377a585a00" ]; then
+        echo "tar.xz"; return 0
+    fi
+
+    # bzip2: "BZh" (42 5a 68)
+    if [ "${header:0:6}" = "425a68" ]; then
+        echo "tar.bz2"; return 0
+    fi
+
+    # tar: magic "ustar" en offset 257 (257*2 = 514 en la cadena hex)
+    if [ "${header:514:10}" = "7573746172" ]; then
+        echo "tar"; return 0
+    fi
+
+    return 1
+}
+
+# ------------------------------------------------------------
 # Extraer archivo descargado o local
+# La detección se hace por cabecera; la extensión es solo fallback.
 # ------------------------------------------------------------
 extract_archive() {
     local archive_path="$1"
     local extract_dir="$2"
-    local base_name
 
-    base_name=$(basename "$archive_path")
-    if [[ "$base_name" == *.casata ]]; then
-        base_name="${base_name%.casata}"
+    if [ ! -f "$archive_path" ]; then
+        echo -e "${RED}Error: Archivo no encontrado: $archive_path${NC}"
+        return 1
     fi
 
-    case "$base_name" in
-        *.zip) unzip -q "$archive_path" -d "$extract_dir" ;;
-        *.tar.gz|*.tgz) tar -xzf "$archive_path" -C "$extract_dir" ;;
-        *.tar.xz) tar -xJf "$archive_path" -C "$extract_dir" ;;
-        *.tar) tar -xf "$archive_path" -C "$extract_dir" ;;
-        *) echo -e "${RED}Formato de archivo no soportado.${NC}"; return 1 ;;
+    local fmt=""
+    fmt=$(detect_archive_format "$archive_path" 2>/dev/null) || fmt=""
+
+    # Fallback: si no se pudo reconocer por cabecera, intentar por extensión
+    if [ -z "$fmt" ]; then
+        local base_name
+        base_name=$(basename "$archive_path")
+        if [[ "$base_name" == *.casata ]]; then
+            base_name="${base_name%.casata}"
+        fi
+        local lower
+        lower=$(printf '%s' "$base_name" | tr '[:upper:]' '[:lower:]')
+        case "$lower" in
+            *.zip)              fmt="zip" ;;
+            *.tar.gz|*.tgz)     fmt="tar.gz" ;;
+            *.tar.xz|*.txz)     fmt="tar.xz" ;;
+            *.tar.bz2|*.tbz2)   fmt="tar.bz2" ;;
+            *.tar)              fmt="tar" ;;
+        esac
+    fi
+
+    if [ -z "$fmt" ]; then
+        echo -e "${RED}Formato de archivo no soportado o no reconocido: $(basename "$archive_path")${NC}"
+        return 1
+    fi
+
+    case "$fmt" in
+        zip)
+            command -v unzip >/dev/null || { echo -e "${RED}Error: 'unzip' no está instalado.${NC}"; return 1; }
+            unzip -q -o "$archive_path" -d "$extract_dir"
+            ;;
+        tar.gz|tgz)    tar -xzf "$archive_path" -C "$extract_dir" ;;
+        tar.xz|txz)    tar -xJf "$archive_path" -C "$extract_dir" ;;
+        tar.bz2|tbz2)  tar -xjf "$archive_path" -C "$extract_dir" ;;
+        tar)           tar -xf  "$archive_path" -C "$extract_dir" ;;
+        *)
+            echo -e "${RED}Formato no soportado: $fmt${NC}"
+            return 1
+            ;;
     esac
 
     SRC_DIR=$(find "$extract_dir" -name "VERSION" -exec dirname {} \; | head -1)
-    [ -z "$SRC_DIR" ] && SRC_DIR=$(find "$extract_dir" -mindepth 1 -maxdepth 1 -type d | head -1)
-    [ -z "$SRC_DIR" ] && SRC_DIR="$extract_dir"
+    if [ -z "$SRC_DIR" ]; then
+        SRC_DIR=$(find "$extract_dir" -mindepth 1 -maxdepth 1 -type d | head -1)
+    fi
+    if [ -z "$SRC_DIR" ]; then
+        SRC_DIR="$extract_dir"
+    fi
     return 0
 }
 
