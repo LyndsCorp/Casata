@@ -4,6 +4,7 @@
 CASATA_ROOT="/usr/local/casata"
 APPS_DIR="$CASATA_ROOT/apps"
 DATA_DIR="$CASATA_ROOT/data"
+SINGREPOS_DIR="$CASATA_ROOT/repos/singrepos"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -79,13 +80,40 @@ done
 
 [ -z "$PKG_NAME" ] && { echo -e "${RED}Error: Falta el nombre del paquete.${NC}"; exit 1; }
 
-DB_FILE="$DATA_DIR/${PKG_NAME}.json"
+# ------------------------------------------------------------
+# Rutas relevantes
+# ------------------------------------------------------------
 APP_DIR="$APPS_DIR/${PKG_NAME}"
+DB_FILE="$DATA_DIR/${PKG_NAME}.json"
+APP_DATA_FILE="$APP_DIR/DATA.json"
+SINGREPO_FILE="$SINGREPOS_DIR/${PKG_NAME}.json"
 
-# Comprobar si existe en la base de datos
-if [ ! -f "$DB_FILE" ]; then
-    echo -e "${RED}Error: El paquete '${PKG_NAME}' no existe en la base de datos.${NC}"
-    exit 1
+# ------------------------------------------------------------
+# Determinar si está instalado y de qué fuente leer los metadatos
+#   Prioridad metadatos:
+#     1) data/<pkg>.json           (instalado desde repositorio)
+#     2) <app_dir>/DATA.json       (instalado con --file)
+#   Método de instalación:
+#     - Si hay singrepo indexado -> Repositorio
+#     - Si está instalado pero no hay singrepo -> Archivo local (--file)
+# ------------------------------------------------------------
+IS_INSTALLED=0
+[ -d "$APP_DIR" ] && IS_INSTALLED=1
+
+SOURCE_DB=""
+if [ -f "$DB_FILE" ]; then
+    SOURCE_DB="$DB_FILE"
+elif [ $IS_INSTALLED -eq 1 ] && [ -f "$APP_DATA_FILE" ]; then
+    SOURCE_DB="$APP_DATA_FILE"
+fi
+
+INSTALL_METHOD=""
+if [ $IS_INSTALLED -eq 1 ]; then
+    if [ -f "$SINGREPO_FILE" ]; then
+        INSTALL_METHOD="Repositorio"
+    else
+        INSTALL_METHOD="Archivo local (--file)"
+    fi
 fi
 
 # Si piden licencia o readme, mostrar contenido si está instalada
@@ -129,31 +157,46 @@ if [ -n "$FLAG" ]; then
     esac
 fi
 
-# Extraer datos de la base de datos
-NAME=$(jq -r '.name' "$DB_FILE")
-DESC=$(jq -r '.description // "No disponible"' "$DB_FILE")
-SIZE=$(jq -r '.size // "Desconocido"' "$DB_FILE")
-USAGE=$(jq -r '.usage // "No especificado"' "$DB_FILE")
+# ------------------------------------------------------------
+# Si no hay fuente de metadatos, no podemos mostrar la ficha
+# ------------------------------------------------------------
+if [ -z "$SOURCE_DB" ]; then
+    if [ $IS_INSTALLED -eq 1 ]; then
+        echo -e "${RED}Error: El paquete '${PKG_NAME}' está instalado pero no tiene metadatos.${NC}"
+        echo -e "${YELLOW}  Ni $DB_FILE ni $APP_DATA_FILE existen.${NC}"
+    else
+        echo -e "${RED}Error: El paquete '${PKG_NAME}' no existe en la base de datos ni está instalado.${NC}"
+    fi
+    exit 1
+fi
 
-# Versión de repositorio (puede ser URL)
-DB_VERSION=$(jq -r '.version // "Desconocida"' "$DB_FILE")
+# ------------------------------------------------------------
+# Extraer datos de la fuente de metadatos elegida
+# ------------------------------------------------------------
+NAME=$(jq -r --arg fallback "$PKG_NAME" '.name // $fallback' "$SOURCE_DB")
+DESC=$(jq -r '.description // "No disponible"' "$SOURCE_DB")
+SIZE=$(jq -r '.size // "Desconocido"' "$SOURCE_DB")
+USAGE=$(jq -r '.usage // "No especificado"' "$SOURCE_DB")
+
+# Versión de repositorio/paquete (puede ser URL)
+DB_VERSION=$(jq -r '.version // "Desconocida"' "$SOURCE_DB")
 if ! DB_VERSION=$(resolve_version "$DB_VERSION"); then
     DB_VERSION="Desconocida"
 fi
 
-DEPS=$(jq -r '.dependencies // [] | join(", ")' "$DB_FILE")
+DEPS=$(jq -r '.dependencies // [] | join(", ")' "$SOURCE_DB")
 [ -z "$DEPS" ] && DEPS="Ninguna"
 
 # ---- Nuevos campos de metadatos ----
-PROJECT=$(jq -r '.project // ""' "$DB_FILE")
-IS_OPEN=$(jq -r '.is_open_source // false' "$DB_FILE")
-SOURCE_CODE=$(jq -r '.source_code // ""' "$DB_FILE")
-ORIGIN=$(jq -r '.origin // ""' "$DB_FILE")
-DEVELOPER=$(jq -r '.developer // ""' "$DB_FILE")
-LICENSE=$(jq -r '.license // ""' "$DB_FILE")
-LICENSE_FILE=$(jq -r '.license_file // ""' "$DB_FILE")
-COPYRIGHT_TITLE=$(jq -r '.copyright_title // ""' "$DB_FILE")
-COPYRIGHT_YEAR=$(jq -r '.copyright_year // ""' "$DB_FILE")
+PROJECT=$(jq -r '.project // ""' "$SOURCE_DB")
+IS_OPEN=$(jq -r '.is_open_source // false' "$SOURCE_DB")
+SOURCE_CODE=$(jq -r '.source_code // ""' "$SOURCE_DB")
+ORIGIN=$(jq -r '.origin // ""' "$SOURCE_DB")
+DEVELOPER=$(jq -r '.developer // ""' "$SOURCE_DB")
+LICENSE=$(jq -r '.license // ""' "$SOURCE_DB")
+LICENSE_FILE=$(jq -r '.license_file // ""' "$SOURCE_DB")
+COPYRIGHT_TITLE=$(jq -r '.copyright_title // ""' "$SOURCE_DB")
+COPYRIGHT_YEAR=$(jq -r '.copyright_year // ""' "$SOURCE_DB")
 
 # Comprobar estado de instalación y versión
 STATUS_STR="${RED}No instalado${NC}"
@@ -178,11 +221,23 @@ if [ -d "$APP_DIR" ]; then
     fi
 fi
 
+# Etiqueta del lado derecho de la versión, según origen
+if [ "$INSTALL_METHOD" = "Repositorio" ]; then
+    VERSION_LABEL="Repositorio"
+elif [ $IS_INSTALLED -eq 1 ]; then
+    VERSION_LABEL="Paquete"
+else
+    VERSION_LABEL="Repositorio"
+fi
+
 # Imprimir la ficha
 echo -e "${GREEN}==================================================${NC}"
 echo -e " Paquete: ${YELLOW}$NAME${NC}"
 echo -e " Estado:  $STATUS_STR"
-echo -e " Versión: Local [$INSTALLED_VERSION] | Repositorio [$DB_VERSION]"
+echo -e " Versión: Local [$INSTALLED_VERSION] | $VERSION_LABEL [$DB_VERSION]"
+if [ $IS_INSTALLED -eq 1 ] && [ -n "$INSTALL_METHOD" ]; then
+    echo -e " Instalado vía: $INSTALL_METHOD"
+fi
 echo -e "${GREEN}==================================================${NC}"
 echo -e " Descripción:  $DESC"
 echo -e " Tamaño:       $SIZE"
@@ -193,7 +248,7 @@ echo -e " Uso:          $USAGE"
 echo -e "${GREEN}--------------------------------------------------${NC}"
 echo -e "${GREEN}📋 Metadatos${NC}"
 
-# Proyecto (nuevo)
+# Proyecto
 if [ -n "$PROJECT" ]; then
     echo -e " Proyecto:     $PROJECT"
 else
