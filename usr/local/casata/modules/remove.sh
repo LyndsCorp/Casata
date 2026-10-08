@@ -1,5 +1,5 @@
 #!/bin/bash
-# /usr/local/casata/modules/remove.sh - elimina múltiples paquetes
+# /usr/local/casata/modules/remove.sh
 # Copyright (C) 2026 David Baña Szymaniak
 
 shopt -s nullglob
@@ -16,6 +16,36 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+# ------------------------------------------------------------
+# Resolver ruta canónica (con fallback si realpath no existe)
+# ------------------------------------------------------------
+canonical_path() {
+    local path="$1"
+    if command -v realpath &>/dev/null; then
+        realpath -m "$path" 2>/dev/null || echo "$path"
+    else
+        echo "$path"
+    fi
+}
+
+# ------------------------------------------------------------
+# Resolver el destino real de un enlace simbólico, aunque sea
+# relativo. Devuelve la ruta absoluta canónica o falla.
+# ------------------------------------------------------------
+resolve_link_target() {
+    local link="$1"
+    local raw
+    raw=$(readlink "$link" 2>/dev/null) || return 1
+    [ -n "$raw" ] || return 1
+
+    # Si el destino es relativo, unirlo al directorio del enlace
+    if [[ "$raw" != /* ]]; then
+        raw="$(dirname "$link")/$raw"
+    fi
+
+    canonical_path "$raw"
+}
+
 # Función para eliminar un solo paquete
 remove_one() {
     local PKG_NAME="$1"
@@ -31,6 +61,7 @@ remove_one() {
         if [ "$EUID" -ne 0 ]; then
             echo -e "${RED}Error: La desinstalación global requiere permisos de root.${NC}"
             echo -e "Usa ${YELLOW}sudo casata remove $PKG_NAME${NC} o ${YELLOW}casata remove --user $PKG_NAME${NC}."
+            INSTALL_TYPE="Global"
             return 1
         fi
         APPS_DIR="$GLOBAL_ROOT/apps"
@@ -58,28 +89,57 @@ remove_one() {
 
     GUIDE_FILE="$APP_DIR/$GUIDE_TARGET"
 
-    # Eliminar enlaces simbólicos
+    # Eliminar enlaces simbólicos SOLO si apuntan a este paquete
     if [ -f "$GUIDE_FILE" ]; then
         echo " -> Eliminando enlaces del sistema..."
-        jq -c '.links[]' "$GUIDE_FILE" 2>/dev/null | while read -r item; do
+        while read -r item; do
             DEST=$(echo "$item" | jq -r '.dest')
             LINK_NAME=$(echo "$item" | jq -r '.name')
-            [ "$DEST" == "null" ] || [ "$LINK_NAME" == "null" ] && continue
+            FILE=$(echo "$item" | jq -r '.file')
+
+            # Saltar entradas malformadas
+            [ "$DEST" == "null" ] || [ "$LINK_NAME" == "null" ] || [ "$FILE" == "null" ] && continue
+            [ -z "$DEST" ] && continue
+            [ -z "$LINK_NAME" ] && continue
+            [ -z "$FILE" ] && continue
+
             DEST="${DEST/#\~/$HOME}"
             DEST="${DEST//\$HOME/$HOME}"
             TARGET_LINK="$DEST/$LINK_NAME"
-            if [ -L "$TARGET_LINK" ]; then
+
+            # ¿Existe algo en la ruta?
+            if [ ! -e "$TARGET_LINK" ] && [ ! -L "$TARGET_LINK" ]; then
+                echo -e "   [=] No existía: $LINK_NAME"
+                continue
+            fi
+
+            # ¿Es un enlace simbólico?
+            if [ ! -L "$TARGET_LINK" ]; then
+                echo -e "   [!] Omitido (no es un enlace): $TARGET_LINK"
+                continue
+            fi
+
+            # Comparar el destino real del enlace con el archivo esperado
+            # dentro del paquete. Sólo se borra si coinciden.
+            expected_real=$(canonical_path "$APP_DIR/$FILE")
+            link_real=$(resolve_link_target "$TARGET_LINK" 2>/dev/null || echo "")
+
+            if [ -z "$link_real" ]; then
+                echo -e "   [!] Omitido (no se pudo resolver el enlace): $TARGET_LINK"
+                continue
+            fi
+
+            if [ "$link_real" = "$expected_real" ]; then
                 rm -f "$TARGET_LINK"
-                echo -e "   [-] Enlace eliminado: ${RED}$LINK_NAME${NC}"
+                echo -e "   [-] Enlace eliminado: ${RED}$LINK_NAME${NC}  ($TARGET_LINK -> $link_real)"
                 log_symlink_removed "$LINK_NAME" "$TARGET_LINK"
             else
-                if [ -e "$TARGET_LINK" ]; then
-                    echo -e "   [!] Omitido (no es un enlace): $TARGET_LINK"
-                else
-                    echo -e "   [=] No existía: $LINK_NAME"
-                fi
+                # El enlace apunta a otro sitio: NO es nuestro, no lo tocamos.
+                echo -e "   ${YELLOW}[!] Omitido (el enlace NO pertenece a '$PKG_NAME'):${NC}"
+                echo -e "       $TARGET_LINK -> $link_real"
+                echo -e "       (esperado -> $expected_real)"
             fi
-        done
+        done < <(jq -c '.links[]' "$GUIDE_FILE" 2>/dev/null)
     else
         echo -e "${YELLOW}Aviso: No se encontró $GUIDE_TARGET. No se eliminarán enlaces, solo la carpeta base.${NC}"
     fi
@@ -123,7 +183,7 @@ for PKG in "${PACKAGES[@]}"; do
         echo -e "${GREEN}✔ $PKG desinstalado correctamente.${NC}"
     else
         echo -e "${RED}✖ Falló la desinstalación de $PKG.${NC}"
-        log_package_removed "$PKG" "$INSTALL_TYPE" "FAILURE"
+        log_package_removed "$PKG" "${INSTALL_TYPE:-desconocido}" "FAILURE"
         FAILED+=("$PKG")
     fi
 done
