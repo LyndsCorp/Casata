@@ -1,5 +1,6 @@
 #!/bin/bash
 # /usr/local/casata/modules/info.sh
+# Copyright (C) 2026 David Baña Szymaniak
 
 CASATA_ROOT="/usr/local/casata"
 APPS_DIR="$CASATA_ROOT/apps"

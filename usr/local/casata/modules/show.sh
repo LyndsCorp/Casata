@@ -1,8 +1,6 @@
 #!/bin/bash
 # /usr/local/casata/modules/show.sh
-# Muestra información técnica de las aplicaciones instaladas globalmente
-# incluyendo tamaños, metadatos y metarepo de origen.
-# Ahora también permite leer README y LICENCIAS.
+# Copyright (C) 2026 David Baña Szymaniak
 
 shopt -s nullglob
 
@@ -10,6 +8,7 @@ CASATA_ROOT="/usr/local/casata"
 SYS_DIR="$CASATA_ROOT/apps"
 DATA_DIR="$CASATA_ROOT/data"
 METAREPOS_DIR="$CASATA_ROOT/repos/metarepos"
+SINGREPOS_DIR="$CASATA_ROOT/repos/singrepos"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -38,10 +37,19 @@ human_readable() {
 
 # ------------------------------------------------------------
 # Busca en qué metarepo está definido el paquete (solo uno)
-# Devuelve el nombre del metarepo o "desconocido"
+# Devuelve el nombre del metarepo o "desconocido".
+# Si no existe singrepo indexado, no tiene sentido buscar metarepo:
+# se considera instalado con --file y se indica como tal.
 # ------------------------------------------------------------
 find_metarepo_for_pkg() {
     local pkg_name="$1"
+
+    # Si no hay singrepo indexado, el paquete no vino de un metarepo
+    if [ ! -f "$SINGREPOS_DIR/${pkg_name}.json" ]; then
+        echo ""
+        return
+    fi
+
     local found=""
     if [ -d "$METAREPOS_DIR" ]; then
         for meta_file in "$METAREPOS_DIR"/*.json; do
@@ -60,6 +68,38 @@ find_metarepo_for_pkg() {
         echo "desconocido"
     else
         echo "$found"
+    fi
+}
+
+# ------------------------------------------------------------
+# Determina el método de instalación del paquete
+#   "Repositorio"            -> existe singrepo indexado
+#   "Archivo local (--file)" -> instalado y sin singrepo
+# ------------------------------------------------------------
+get_install_method() {
+    local pkg_name="$1"
+    if [ -f "$SINGREPOS_DIR/${pkg_name}.json" ]; then
+        echo "Repositorio"
+    else
+        echo "Archivo local (--file)"
+    fi
+}
+
+# ------------------------------------------------------------
+# Resuelve el archivo de metadatos a usar:
+#   1) $DATA_DIR/<pkg>.json
+#   2) $SYS_DIR/<pkg>/DATA.json (paquetes --file)
+# Devuelve la ruta por stdout o vacío si no hay ninguno.
+# ------------------------------------------------------------
+resolve_metadata_file() {
+    local pkg_name="$1"
+    local app_dir="$SYS_DIR/$pkg_name"
+    if [ -f "$DATA_DIR/${pkg_name}.json" ]; then
+        printf '%s' "$DATA_DIR/${pkg_name}.json"
+    elif [ -f "$app_dir/DATA.json" ]; then
+        printf '%s' "$app_dir/DATA.json"
+    else
+        printf ''
     fi
 }
 
@@ -94,9 +134,17 @@ show_app_info() {
         echo -e "  ${YELLOW}Tamaño en disco:${NC} (directorio no accesible)"
     fi
 
+    # --- Método de instalación ---
+    local install_method
+    install_method=$(get_install_method "$pkg_name")
+    echo -e "  ${YELLOW}Instalado vía:${NC} $install_method"
+
+    # --- Resolver archivo de metadatos ---
+    local meta_file
+    meta_file=$(resolve_metadata_file "$pkg_name")
+
     # --- Tamaño según metadatos ---
-    local meta_file="$DATA_DIR/${pkg_name}.json"
-    if [ -f "$meta_file" ]; then
+    if [ -n "$meta_file" ] && [ -f "$meta_file" ]; then
         size_meta=$(jq -r '.size // ""' "$meta_file" 2>/dev/null)
         if [ -n "$size_meta" ]; then
             echo -e "  ${YELLOW}Tamaño según metadatos:${NC} $size_meta"
@@ -115,15 +163,20 @@ show_app_info() {
         echo -e "  ${YELLOW}Versión:${NC} (desconocida)"
     fi
 
-    # Metarepo de origen
-    local metarepo=$(find_metarepo_for_pkg "$pkg_name")
-    echo -e "  ${YELLOW}Metarepo:${NC} $metarepo"
+    # Metarepo de origen (solo si hay singrepo indexado)
+    local metarepo
+    metarepo=$(find_metarepo_for_pkg "$pkg_name")
+    if [ -n "$metarepo" ]; then
+        echo -e "  ${YELLOW}Metarepo:${NC} $metarepo"
+    else
+        echo -e "  ${YELLOW}Metarepo:${NC} ${YELLOW}(no aplica, instalado desde archivo)${NC}"
+    fi
 
     # Enlaces simbólicos desde GUIDE.json
     local guide_file="$app_dir/GUIDE.json"
     if [ -f "$guide_file" ]; then
         echo -e "  ${YELLOW}Enlaces simbólicos:${NC}"
-        jq -c '.links[]' "$guide_file" 2>/dev/null | while read -r item; do
+        while read -r item; do
             dest=$(echo "$item" | jq -r '.dest // ""')
             name=$(echo "$item" | jq -r '.name // ""')
             if [ -n "$dest" ] && [ -n "$name" ]; then
@@ -131,13 +184,13 @@ show_app_info() {
                 dest_expanded="${dest_expanded//\$HOME/$HOME}"
                 echo -e "    → $name ${GREEN}->${NC} $dest_expanded"
             fi
-        done
+        done < <(jq -c '.links[]' "$guide_file" 2>/dev/null)
     else
         echo -e "  ${YELLOW}Enlaces simbólicos:${NC} (no definidos)"
     fi
 
     # ---- Mostrar metadatos del repositorio si existen ----
-    if [ -f "$meta_file" ]; then
+    if [ -n "$meta_file" ] && [ -f "$meta_file" ]; then
         echo -e "  ${YELLOW}Metadatos del repositorio:${NC}"
         local project=$(jq -r '.project // ""' "$meta_file" 2>/dev/null)
         local is_open=$(jq -r '.is_open_source // ""' "$meta_file" 2>/dev/null)
@@ -154,8 +207,6 @@ show_app_info() {
         [ -n "$license" ] && echo -e "    Licencia: $license" || echo -e "    Licencia: ${YELLOW}(no especificada)${NC}"
 
         # Código fuente: si is_open es false o 0 -> "No es de código abierto"
-        # si is_open es true o 1 -> mostrar source_code o "no especificado"
-        # si no está definido -> mostrar source_code si existe, sino "no especificado"
         if [ "$is_open" = "false" ] || [ "$is_open" = "0" ]; then
             echo -e "    Código fuente: ${RED}No es de código abierto${NC}"
         else
@@ -178,6 +229,8 @@ show_app_info() {
         else
             echo -e "    Copyright: ${YELLOW}(no especificado)${NC}"
         fi
+    else
+        echo -e "  ${YELLOW}Metadatos del repositorio:${NC} (no hay metadatos disponibles)"
     fi
 
     echo ""
